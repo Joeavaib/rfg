@@ -1,0 +1,8 @@
+# Project MCP: rfg tools (status, next, apply, verify, rollback, …).
+# Restart the Grok session or press r on the MCP tab after changing this file.
+
+[mcp_servers.rfg]
+command = "python3"
+args = ["rfg.py", "mcp"]
+env = { PYTHONPATH = "." }
+enabled = true

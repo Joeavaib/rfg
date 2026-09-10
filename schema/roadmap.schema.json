@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rfg.dev/schema/roadmap.json",
+  "title": "Roadmap",
+  "type": "object",
+  "required": ["version", "id", "hypothesis", "steps"],
+  "additionalProperties": false,
+  "properties": {
+    "version": { "type": "integer", "minimum": 0 },
+    "id": { "type": "string", "minLength": 1 },
+    "hypothesis": { "$ref": "hypothesis.json" },
+    "verify": { "type": "string" },
+    "steps": {
+      "type": "array",
+      "items": { "$ref": "step.json" }
+    }
+  }
+}

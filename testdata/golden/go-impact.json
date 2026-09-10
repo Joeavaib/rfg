@@ -1,0 +1,4 @@
+{
+  "query": "UserID",
+  "files": ["store.go", "user.go"]
+}

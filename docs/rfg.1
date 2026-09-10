@@ -1,0 +1,26 @@
+.TH RFG 1 "2026" "rfg 1.0.0" "User Commands"
+.SH NAME
+rfg \- lead a multi-step refactor locally
+.SH SYNOPSIS
+.B rfg
+[\fB--format\fR json] [\fB--root\fR DIR] \fICOMMAND\fR
+.SH DESCRIPTION
+Stores a versioned roadmap in
+.PA .rfg/roadmap.yaml
+and mutable state in
+.PA .rfg/state.json .
+Apply runs in a git worktree. Git is the transaction system.
+.SH COMMANDS
+init, status, plan, next, apply, verify, rollback, why, impact, index,
+import-scip, mcp, edges, migrate, doctor, completion, man, version.
+.SH EXIT CODES
+0 ok, 2 verify fail, 3 dirty, 4 unsupported, 5 conflict.
+.SH ENVIRONMENT
+.TP
+.B RFG_OFFLINE
+If set, refuse optional network features (none are used by default).
+.TP
+.B RFG_TELEMETRY
+Opt-in local telemetry log at .rfg/telemetry.log. Never sent.
+.SH SEE ALSO
+docs/INTEGRATION.md

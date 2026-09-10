@@ -1,0 +1,34 @@
+# Language capability flags. Unsupported is better than wrong.
+languages:
+  typescript:
+    discover: true
+    index_syntax: true
+    index_semantic: false
+    apply_replace: true
+    rename: false
+  go:
+    discover: true
+    index_syntax: true
+    index_semantic: false
+    apply_replace: true
+    rename: false
+  python:
+    discover: true
+    index_syntax: true
+    index_semantic: false
+    apply_replace: true
+    rename: false
+  rust:
+    discover: true
+    index_syntax: true
+    index_semantic: rust-analyzer  # only if on PATH
+    apply_replace: true
+    rename: false
+    macros: unsupported
+  cpp:
+    discover: true
+    index_syntax: true
+    index_semantic: clangd  # requires compile_commands.json
+    apply_replace: false     # without compile-db: search only
+    rename: compile_commands.json
+    apply_without_compile_db: false

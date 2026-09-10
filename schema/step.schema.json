@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rfg.dev/schema/step.json",
+  "title": "Step",
+  "type": "object",
+  "required": ["id", "title"],
+  "additionalProperties": false,
+  "properties": {
+    "id": { "type": "string", "minLength": 1 },
+    "title": { "type": "string" },
+    "depends_on": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "replace": {
+      "type": "object",
+      "required": ["from", "to"],
+      "properties": {
+        "from": { "type": "string" },
+        "to": { "type": "string" },
+        "paths": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      }
+    },
+    "verify": { "type": "string" },
+    "engine": { "type": "string", "description": "replace | ast-grep | manual" },
+    "diff_budget": { "type": "integer", "minimum": 0 },
+    "edge": { "type": "string", "description": "cgo | pyo3 | napi | cxx-ffi" }
+  }
+}

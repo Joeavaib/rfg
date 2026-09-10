@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rfg.dev/schema/impact_report.json",
+  "title": "ImpactReport",
+  "type": "object",
+  "required": ["files", "hits"],
+  "additionalProperties": false,
+  "properties": {
+    "hypothesis_id": { "type": "string" },
+    "query": { "type": "string" },
+    "hits": { "type": "integer", "minimum": 0 },
+    "files": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["path", "hits"],
+        "properties": {
+          "path": { "type": "string" },
+          "hits": { "type": "integer" },
+          "kind": { "type": "string" }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rfg.dev/schema/hypothesis.json",
+  "title": "Hypothesis",
+  "type": "object",
+  "required": ["id", "statement"],
+  "additionalProperties": false,
+  "properties": {
+    "id": { "type": "string" },
+    "statement": { "type": "string" },
+    "symbol": { "type": "string" },
+    "from": { "type": "string" },
+    "to": { "type": "string" }
+  }
+}

@@ -1,0 +1,21 @@
+name: rfg status
+on:
+  push:
+  pull_request:
+jobs:
+  status:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: tests
+        run: PYTHONPATH=. python3 -m unittest discover -s tests -q
+      - name: license-check
+        run: python3 scripts/license-check.py
+      - name: rfg doctor
+        run: python3 rfg.py doctor --format json
+      - name: rfg status
+        run: python3 rfg.py status --format json
+        continue-on-error: true

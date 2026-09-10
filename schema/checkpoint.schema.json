@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rfg.dev/schema/checkpoint.json",
+  "title": "Checkpoint",
+  "type": "object",
+  "required": ["id", "step_id", "commit"],
+  "additionalProperties": false,
+  "properties": {
+    "id": { "type": "string" },
+    "step_id": { "type": "string" },
+    "commit": { "type": "string" },
+    "worktree": { "type": "string" },
+    "created_at": { "type": "string" }
+  }
+}

@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rfg.dev/schema/status.json",
+  "title": "Status",
+  "type": "object",
+  "required": ["roadmap_id", "steps", "next"],
+  "additionalProperties": false,
+  "properties": {
+    "roadmap_id": { "type": "string" },
+    "hypothesis": { "type": "string" },
+    "next": { "type": ["string", "null"] },
+    "dirty": { "type": "boolean" },
+    "worktree": { "type": "string" },
+    "last_checkpoint": { "type": ["string", "null"] },
+    "steps": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "status"],
+        "properties": {
+          "id": { "type": "string" },
+          "title": { "type": "string" },
+          "status": {
+            "type": "string",
+            "enum": ["pending", "ready", "blocked", "applied", "verified", "failed"]
+          },
+          "depends_on": { "type": "array", "items": { "type": "string" } }
+        }
+      }
+    }
+  }
+}

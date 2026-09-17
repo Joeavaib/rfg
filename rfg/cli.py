@@ -130,7 +130,8 @@ Commands:
   context [step]       step contract + snippets for existing paths
   tick                 apply+verify if replace; stop with contract if manual/implement
   verify               run verify for an implemented/applied step
-  land                 copy the apply worktree onto the root and re-verify
+  land [--commit|--no-commit]  copy the apply worktree onto the root and re-verify
+                        (--commit or RFG_AUTO_COMMIT=1 snapshots a local commit; never pushes)
   rollback last        restore the last checkpoint
   why                  explain why a step is ready/blocked
   impact [--symbol S]  file/import/export hit counts (index or SCIP)
@@ -1392,7 +1393,34 @@ class CLI:
         self.emit("verify", {"step": sid, "command": cmd, "output": clip_output(out), "log": log_path})
         return OK
 
-    def cmd_land(self, _args: list[str]) -> int:
+    def _maybe_autocommit(self, rm, state, args: list[str]) -> dict:
+        """Opt-in local snapshot commit after a successful land.
+
+        Enabled by `--commit` or `RFG_AUTO_COMMIT=1`, disabled by
+        `--no-commit`. Commits everything git sees except `.rfg/`
+        (always excluded; gitignore honored otherwise) with a generated
+        message. Never pushes. Any failure (or a clean tree) degrades
+        to a payload note; the land itself already succeeded and stays
+        exit 0.
+        """
+        force = "--commit" in (args or [])
+        off = "--no-commit" in (args or [])
+        if off or (os.environ.get("RFG_AUTO_COMMIT") != "1" and not force):
+            return {}
+        try:
+            if not gitops.is_repo(self.root):
+                return {"commit_skipped": "not a git repository"}
+            total = len(rm.steps)
+            done = len(state.verified)
+            msg = f"rfg land: {rm.goal.statement} ({done}/{total} verified)"
+            sha = gitops.commit_all(self.root, msg)
+        except Exception as e:
+            return {"commit_warning": f"auto-commit failed ({e}); land itself succeeded"}
+        if not sha:
+            return {"commit_skipped": "tree clean, nothing to commit"}
+        return {"commit": sha}
+
+    def cmd_land(self, args: list[str]) -> int:
         try:
             st, rm, state = self.load()
         except FileNotFoundError as e:
@@ -1422,22 +1450,23 @@ class CLI:
             cmd = (step.verify if step else "") or rm.verify
             no_tx = not gitops.has_head(self.root) or (not wt) or Path(wt).resolve() == Path(self.root).resolve()
             if no_tx:
-                self.emit(
-                    "land",
-                    {
-                        "files": [],
-                        "deleted": [],
-                        "noop": True,
-                        "reason": "noop-no-transaction",
-                        "reverify": "skipped",
-                        "verify": cmd,
-                        "no_head_commit": not gitops.has_head(self.root),
-                        "acceptance_prose": accept.prose(rm),
-                    },
-                )
+                payload = {
+                    "files": [],
+                    "deleted": [],
+                    "noop": True,
+                    "reason": "noop-no-transaction",
+                    "reverify": "skipped",
+                    "verify": cmd,
+                    "no_head_commit": not gitops.has_head(self.root),
+                    "acceptance_prose": accept.prose(rm),
+                }
+                payload.update(self._maybe_autocommit(rm, state, args))
+                self.emit("land", payload)
                 return OK
             if is_fallback_verify(cmd) or is_trivial(cmd):
-                self.emit("land", {"files": [], "deleted": [], "noop": True, "reverify": "skipped", "verify": cmd, "acceptance_prose": accept.prose(rm)})
+                payload = {"files": [], "deleted": [], "noop": True, "reverify": "skipped", "verify": cmd, "acceptance_prose": accept.prose(rm)}
+                payload.update(self._maybe_autocommit(rm, state, args))
+                self.emit("land", payload)
                 return OK
             code, out = run_verify(self.root, cmd, "test")
             write_verify_log(self.root, sid or "land", cmd, code, out)
@@ -1469,6 +1498,7 @@ class CLI:
                     "output": clip_output(out),
                     "acceptance": acc_rows,
                     "acceptance_prose": accept.prose(rm),
+                    **self._maybe_autocommit(rm, state, args),
                 },
             )
             return OK
@@ -1493,7 +1523,9 @@ class CLI:
         step = dag.step_by_id(rm, sid) if sid else None
         cmd = (step.verify if step else "") or rm.verify
         if result.get("noop"):
-            self.emit("land", {"files": [], "deleted": [], "noop": True, "verify": cmd, "acceptance_prose": accept.prose(rm)})
+            payload = {"files": [], "deleted": [], "noop": True, "verify": cmd, "acceptance_prose": accept.prose(rm)}
+            payload.update(self._maybe_autocommit(rm, state, args))
+            self.emit("land", payload)
             return OK
         if is_trivial(cmd):
             gitops.revert_land(self.root, result.get("backups") or [])
@@ -1534,6 +1566,7 @@ class CLI:
                 "output": clip_output(out),
                 "acceptance": acc_rows,
                 "acceptance_prose": accept.prose(rm),
+                **self._maybe_autocommit(rm, state, args),
             },
         )
         return OK

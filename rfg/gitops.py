@@ -133,6 +133,28 @@ def snapshot(dir: str | Path, msg: str) -> str:
     return head(dir)
 
 
+def commit_all(dir: str | Path, msg: str) -> str:
+    """Stage everything except `.rfg/` and commit locally. Never pushes.
+
+    `.rfg/` (worktree, logs, state) is unstaged again after `add -A`
+    (plain `add` with an explicit `:!.rfg` pathspec errors out on some
+    git versions when `.rfg` is gitignored). Returns the new sha, or ""
+    when the tree was clean (nothing to commit). Raises RuntimeError
+    on failure (e.g. missing identity) so callers can warn instead of
+    failing their own operation.
+    """
+    _run(dir, "add", "-A")
+    if has_head(dir):
+        try:
+            _run(dir, "reset", "-q", "--", ".rfg")
+        except RuntimeError:
+            pass
+    if not _porcelain(dir):
+        return ""
+    _run(dir, "commit", "-m", msg)
+    return head(dir)
+
+
 def _porcelain(dir: str | Path) -> list[tuple[str, str]]:
     try:
         out = _run(dir, "status", "--porcelain", "-uall")

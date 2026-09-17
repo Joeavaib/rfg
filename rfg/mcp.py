@@ -79,7 +79,7 @@ SCHEMAS = {
     },
     "release": {"type": "object", "properties": {"root": _ROOT}},
     "verify": {"type": "object", "properties": {"root": _ROOT, "step": _STR}},
-    "land": {"type": "object", "properties": {"root": _ROOT}},
+    "land": {"type": "object", "properties": {"root": _ROOT, "commit": _BOOL}},
     "rollback": {"type": "object", "properties": {"root": _ROOT}},
     "claim": {"type": "object", "properties": {"root": _ROOT, "step": _STR, "agent": _STR}},
     "progress": {"type": "object", "properties": {"root": _ROOT}},
@@ -230,6 +230,8 @@ def call_tool(name: str, arguments: dict[str, Any], root: str) -> tuple[int, dic
             args.append(str(arguments["step"]))
         return c.cmd_verify(args), {}
     if name == "land":
+        if arguments.get("commit"):
+            return c.cmd_land(["--commit"]), {}
         return c.cmd_land([]), {}
     if name == "rollback":
         return c.cmd_rollback(["last"]), {}

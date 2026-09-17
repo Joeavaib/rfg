@@ -81,6 +81,42 @@ class WorktreePruneTest(_Repo):
         self.assertEqual(wt1.resolve(), wt2.resolve())
         self.assertTrue((wt2 / "marker.txt").is_file())
 
+    def test_foreign_gitdir_healed(self):
+        from rfg import gitops
+
+        # second repo plays the "manual clone": an existing but foreign gitdir.
+        other = tempfile.mkdtemp(prefix="rfg-wt-foreign-")
+        self.addCleanup(shutil.rmtree, other, ignore_errors=True)
+        subprocess.check_call(["git", "init", "-q"], cwd=other, env=self.env)
+        subprocess.check_call(["git", "config", "user.email", "t@t.test"], cwd=other, env=self.env)
+        subprocess.check_call(["git", "config", "user.name", "t"], cwd=other, env=self.env)
+        Path(other, "app.py").write_text("x = 1\n")
+        subprocess.check_call(["git", "add", "-A"], cwd=other, env=self.env,
+                              stdout=subprocess.DEVNULL)
+        subprocess.check_call(["git", "commit", "-qm", "i"], cwd=other, env=self.env)
+        foreign_wt = Path(gitops.ensure_worktree(other))
+        foreign_gitdir = (foreign_wt / ".git").read_text(encoding="utf-8")
+
+        wt = Path(gitops.ensure_worktree(self.td))
+        self.assertTrue(gitops._gitdir_owned_by_root(wt, self.td))
+        (wt / ".git").write_text(foreign_gitdir)
+        # foreign but existing: still answers rev-parse ...
+        r = subprocess.run(["git", "-C", str(wt), "rev-parse", "--is-inside-work-tree"],
+                           env=self.env, capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        # ... yet must count as unusable for THIS root and heal to it.
+        self.assertFalse(gitops._gitdir_owned_by_root(wt, self.td))
+        healed = Path(gitops.ensure_worktree(self.td))
+        self.assertEqual(healed.resolve(), wt.resolve())
+        self.assertTrue(gitops._gitdir_owned_by_root(healed, self.td))
+        r = subprocess.run(["git", "-C", str(healed), "rev-parse", "HEAD"], env=self.env,
+                           capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        # foreign repo untouched: its worktree still registered there.
+        r = subprocess.run(["git", "worktree", "list"], cwd=other, env=self.env,
+                           capture_output=True, text=True)
+        self.assertIn(str(foreign_wt), r.stdout)
+
 
 class WorktreeEnsureTest(_Repo):
     def test_worktree_usable_predicate(self):

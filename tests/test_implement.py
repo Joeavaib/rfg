@@ -518,6 +518,32 @@ class ImplementLoopTest(unittest.TestCase):
         kinds = {e["kind"] for e in prog["data"]["exceptions"]}
         self.assertNotIn("acceptance", kinds)
 
+    def test_run_verify_runs_at_root_not_worktree(self):
+        # run applies at root without isolation, so verify must run at root
+        # too: a marker untracked at root is invisible in the worktree that
+        # a prior stop-engine step left behind in state (Arm B: heal->smoke).
+        self.rfg("init")
+        Path(self.td, "app.py").write_text("x = 1\n")
+        subprocess.check_call(["git", "add", "-A"], cwd=self.td, env=self.env,
+                              stdout=subprocess.DEVNULL)
+        subprocess.check_call(["git", "commit", "-qm", "i"], cwd=self.td, env=self.env)
+        self.rfg(
+            "plan", "--step", "M1", "--engine", "implement", "--want", "w",
+            "--path", "app.py", "--verify", "test -f app.py",
+        )
+        self.rfg("tick", "M1")
+        self.rfg("apply", "M1")
+        self.rfg("verify", "M1")
+        Path(self.td, "marker.txt").write_text("root-only\n")
+        self.rfg(
+            "plan", "--step", "R1", "--engine", "run", "--want", "w",
+            "--path", "marker.txt", "--verify", "test -f marker.txt",
+        )
+        self.rfg("tick", "R1")
+        self.rfg("verify", "R1")
+        prog = json.loads(self.rfg("progress", "--format", "json"))
+        self.assertTrue(prog["data"]["ok"], prog)
+
 
 if __name__ == "__main__":
     unittest.main()

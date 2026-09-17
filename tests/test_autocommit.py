@@ -108,6 +108,9 @@ class AutocommitTest(unittest.TestCase):
                    GIT_COMMITTER_NAME="", GIT_COMMITTER_EMAIL="")
         subprocess.run(["git", "config", "--unset", "user.email"], cwd=self.td, env=self.env)
         subprocess.run(["git", "config", "--unset", "user.name"], cwd=self.td, env=self.env)
+        # git auto-detects identity from OS user/host when unconfigured;
+        # force the no-identity failure this test needs.
+        subprocess.run(["git", "config", "user.useConfigOnly", "true"], cwd=self.td, env=self.env)
         r = subprocess.run(RFG + ["--root", self.td, "land", "--format", "json"],
                            cwd=self.td, env=env, capture_output=True, text=True)
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)

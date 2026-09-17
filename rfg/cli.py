@@ -1380,7 +1380,12 @@ class CLI:
             if cxxcompile.should_default(here, paths) or cxxcompile.should_default(self.root, paths):
                 cmd = cxxcompile.command(here if Path(here, "compile_commands.json").is_file() else self.root, paths)
         loc = context.where_to_edit(self.root, state, step)
-        directory = self.root if loc.get("edit_root") else (state.worktree or self.root)
+        # run applies at root without isolation, so it must also verify at
+        # root: a fresh worktree has neither the roadmap nor root-untracked
+        # files, and worktree-relative commands (parity, scripts/) fail there
+        # spuriously while apply saw root.
+        run_at_root = (step.engine or "") == "run"
+        directory = self.root if (loc.get("edit_root") or run_at_root) else (state.worktree or self.root)
         if kind == "test" and is_trivial(cmd):
             self.emit_err("verify", "unsupported: trivial verify (need a real command, not true/empty)")
             return UNSUPPORTED

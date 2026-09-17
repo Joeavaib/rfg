@@ -126,6 +126,28 @@ class CxxDriverTest(unittest.TestCase):
         self.assertEqual(r.returncode, 0)
         self.assertIn("next", r.stdout)
 
+    def test_claim_then_apply_without_agent_is_same_client(self):
+        # empty agent is this client (Python same_claim_client), not a second
+        # identity: claim stores "agent" by default, a later apply without
+        # RFG_AGENT/--agent must not self-conflict (exit 5).
+        Path(self.td, "user.go").write_text("package users\ntype UserID string\n")
+        Path(self.td, "go.mod").write_text("module m\n")
+        self.git()
+        self.cxx("init")
+        self.cxx(
+            "plan", "--step", "s1", "--from", "UserID", "--to", "UID",
+            "--path", "user.go", "--verify", "test -n ok",
+        )
+        self.cxx("claim", "s1")
+        # a genuinely different agent must still conflict while free.
+        env2 = dict(self.env, RFG_AGENT="other")
+        r = subprocess.run(
+            [str(CXX), "--root", self.td, "--format", "json", "apply"],
+            cwd=self.td, env=env2, capture_output=True, text=True,
+        )
+        self.assertEqual(r.returncode, 5, r.stdout + r.stderr)
+        self.cxx("apply")
+
 
 if __name__ == "__main__":
     unittest.main()

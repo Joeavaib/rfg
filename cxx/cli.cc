@@ -232,7 +232,10 @@ static int do_apply(const std::string& root, const std::vector<std::string>& arg
     return CONFLICT;
   }
   std::string agent = env_or("RFG_AGENT");
-  if (!st.claim_agent.empty() && (agent.empty() || agent != st.claim_agent)) {
+  // Empty agent is this client (same as Python same_claim_client), not a
+  // second identity: claim stores "agent" by default, so a later apply
+  // without RFG_AGENT/--agent must not self-conflict.
+  if (!st.claim_agent.empty() && !agent.empty() && agent != st.claim_agent) {
     emit("apply", "{}", false, "conflict: claimed by " + st.claim_agent);
     return CONFLICT;
   }

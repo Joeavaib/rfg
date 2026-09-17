@@ -125,9 +125,42 @@ def _worktree_usable(wt: Path) -> bool:
     return False
 
 
+def _gitdir_owned_by_root(wt: Path, root: str | Path) -> bool:
+    """True when wt/.git gitdir resolves under root/.git/worktrees/.
+
+    A `.git` file pointing at an *existing but foreign* gitdir (stale
+    absolute path after a manual clone, state.worktree from another
+    checkout) answers `rev-parse` fine but belongs to another repo, so
+    `_worktree_usable` alone accepts it. Only linked worktrees of THIS
+    root are usable; anything else is pruned and recreated. Non-linked
+    layouts (no `.git` file) are left to `_worktree_usable`.
+    """
+    gitf = wt / ".git"
+    if not gitf.is_file():
+        return True
+    try:
+        target = gitf.read_text(encoding="utf-8").strip()
+    except OSError:
+        return False
+    if not target.startswith("gitdir:"):
+        return False
+    target = target[len("gitdir:") :].strip()
+    if not target:
+        return False
+    gdir = Path(target)
+    if not gdir.is_absolute():
+        gdir = wt / gdir
+    try:
+        owned = Path(root).resolve() / ".git" / "worktrees"
+        gdir.resolve().relative_to(owned)
+        return True
+    except (OSError, ValueError):
+        return False
+
+
 def ensure_worktree(root: str | Path) -> Path:
     wt = worktree_path(root)
-    if _worktree_usable(wt):
+    if _worktree_usable(wt) and _gitdir_owned_by_root(wt, root):
         return wt
     if wt.exists():
         try:

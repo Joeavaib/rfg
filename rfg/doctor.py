@@ -346,6 +346,18 @@ def run(root: str | Path) -> dict:
             "> compile_commands.json"
         )
     checks["cxx_db_hint"] = {"ok": True, "detail": cxx_hint}
+    wt_note = "ok"
+    try:
+        wt = gitops.worktree_path(root)
+        if wt.exists() and not gitops._gitdir_owned_by_root(wt, root):
+            wt_note = (
+                f".rfg/worktree/.git points outside {root}/.git/worktrees "
+                "(stale absolute gitdir after manual clone); "
+                "ensure_worktree will prune and recreate it"
+            )
+    except Exception:
+        pass
+    checks["worktree"] = {"ok": True, "detail": wt_note}
     # compile db missing is not a doctor failure; it's informational
     failed = [k for k, v in checks.items() if not v["ok"] and k in {"python", "git", "repo"}]
     return {

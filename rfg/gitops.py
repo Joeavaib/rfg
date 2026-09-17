@@ -193,6 +193,89 @@ def commit_all(dir: str | Path, msg: str) -> str:
     return head(dir)
 
 
+LAND_BACKUP_DIR = "land-backups"
+LAND_BACKUP_KEEP = 10
+
+
+def backup_roadmap_state(root: str | Path, backup_id: str | None = None) -> dict:
+    """Copy `.rfg/roadmap.yaml` + `.rfg/state.json` aside for harness recovery.
+
+    `.rfg/` is gitignored, so without this copy a lost worktree means a lost
+    campaign: recovery purely via the harness would be impossible. Backups
+    live in `.rfg/land-backups/<backup_id>/` with `<backup_id>` defaulting
+    to `<UTC-timestamp>-<sha1(content)[:8]>` (sortable, idempotent for
+    identical content within the same second). Manual recovery path: copy
+    both files back into `.rfg/` (see `restore_roadmap_state`). Raises
+    OSError when the source files are missing/unreadable so callers can
+    warn instead of failing their own operation.
+    """
+    import hashlib
+    from datetime import datetime, timezone
+
+    rfg = Path(root) / ".rfg"
+    rm_b = (rfg / "roadmap.yaml").read_bytes()
+    st_b = (rfg / "state.json").read_bytes()
+    if not backup_id:
+        ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S")
+        digest = hashlib.sha1(rm_b + b"\x00" + st_b).hexdigest()[:8]
+        backup_id = f"{ts}-{digest}"
+    if not backup_id or backup_id.startswith("/") or ".." in Path(backup_id).parts:
+        raise OSError(f"invalid backup id: {backup_id!r}")
+    dest = rfg / LAND_BACKUP_DIR / backup_id
+    dest.mkdir(parents=True, exist_ok=True)
+    (dest / "roadmap.yaml").write_bytes(rm_b)
+    (dest / "state.json").write_bytes(st_b)
+    _prune_land_backups(rfg / LAND_BACKUP_DIR)
+    return {"dir": backup_id, "files": ["roadmap.yaml", "state.json"]}
+
+
+def restore_roadmap_state(root: str | Path, backup_id: str) -> dict:
+    """Restore `.rfg/roadmap.yaml` + `.rfg/state.json` from a land backup.
+
+    Recovery path when the harness store is lost (`.rfg/` is gitignored):
+    pick a backup id from `.rfg/land-backups/` (newest sorts last) and call
+    this helper — or manually copy both files back into `.rfg/`. Existing
+    files are overwritten. Raises OSError for unknown backup ids or
+    unreadable backups.
+    """
+    import shutil
+
+    if not backup_id or backup_id.startswith("/") or ".." in Path(backup_id).parts:
+        raise OSError(f"invalid backup id: {backup_id!r}")
+    src = Path(root) / ".rfg" / LAND_BACKUP_DIR / backup_id
+    if not src.is_dir():
+        raise OSError(f"unknown backup: {backup_id!r}")
+    rfg = Path(root) / ".rfg"
+    restored: list[str] = []
+    for name in ("roadmap.yaml", "state.json"):
+        blob = src / name
+        if not blob.is_file():
+            raise OSError(f"backup {backup_id!r} misses {name}")
+        shutil.copy2(blob, rfg / name)
+        restored.append(name)
+    return {"dir": backup_id, "files": restored}
+
+
+def _prune_land_backups(backup_root: Path, keep: int = LAND_BACKUP_KEEP) -> None:
+    """Best-effort cap: keep the newest `keep` backup dirs (name-sorted).
+
+    Backup ids start with a UTC timestamp so lexicographic order is
+    chronological. Only directories are removed, errors are swallowed:
+    pruning is hygiene, it must never fail a land.
+    """
+    import shutil
+
+    try:
+        names = sorted(p.name for p in backup_root.iterdir() if p.is_dir())
+    except OSError:
+        return
+    for name in names[: max(0, len(names) - keep)]:
+        try:
+            shutil.rmtree(backup_root / name)
+        except OSError:
+            continue
+
+
 def _porcelain(dir: str | Path) -> list[tuple[str, str]]:
     try:
         out = _run(dir, "status", "--porcelain", "-uall")

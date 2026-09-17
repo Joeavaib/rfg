@@ -1586,6 +1586,17 @@ class CLI:
             return {"commit_skipped": "tree clean, nothing to commit"}
         return {"commit": sha}
 
+    def _state_backup_payload(self) -> dict:
+        """Best-effort roadmap/state backup for successful lands (R6).
+
+        Never fails the land: `.rfg/` is gitignored, so this copy is the
+        only harness-side recovery path. Returns {}-with-warning on error.
+        """
+        try:
+            return {"state_backup": gitops.backup_roadmap_state(self.root)}
+        except OSError as e:
+            return {"warning": f"state backup failed: {e}"}
+
     def cmd_land(self, args: list[str]) -> int:
         try:
             st, rm, state = self.load()
@@ -1627,11 +1638,13 @@ class CLI:
                     "acceptance_prose": accept.prose(rm),
                 }
                 payload.update(self._maybe_autocommit(rm, state, args))
+                payload.update(self._state_backup_payload())
                 self.emit("land", payload)
                 return OK
             if is_fallback_verify(cmd) or is_trivial(cmd):
                 payload = {"files": [], "deleted": [], "noop": True, "reverify": "skipped", "verify": cmd, "acceptance_prose": accept.prose(rm)}
                 payload.update(self._maybe_autocommit(rm, state, args))
+                payload.update(self._state_backup_payload())
                 self.emit("land", payload)
                 return OK
             code, out = run_verify(self.root, cmd, "test")
@@ -1665,22 +1678,7 @@ class CLI:
                     "acceptance": acc_rows,
                     "acceptance_prose": accept.prose(rm),
                     **self._maybe_autocommit(rm, state, args),
-                },
-            )
-            return OK
-            if acc_code != 0:
-                self.emit_err("land", ((acc_out or "") + " land acceptance failed").strip())
-                return VERIFY_FAIL
-            self.emit(
-                "land",
-                {
-                    "files": [],
-                    "deleted": [],
-                    "noop": True,
-                    "reverify": True,
-                    "verify": cmd,
-                    "output": clip_output(out),
-                    "acceptance": acc_rows,
+                    **self._state_backup_payload(),
                 },
             )
             return OK
@@ -1691,6 +1689,7 @@ class CLI:
         if result.get("noop"):
             payload = {"files": [], "deleted": [], "noop": True, "verify": cmd, "acceptance_prose": accept.prose(rm)}
             payload.update(self._maybe_autocommit(rm, state, args))
+            payload.update(self._state_backup_payload())
             self.emit("land", payload)
             return OK
         if is_trivial(cmd):
@@ -1733,6 +1732,7 @@ class CLI:
                 "acceptance": acc_rows,
                 "acceptance_prose": accept.prose(rm),
                 **self._maybe_autocommit(rm, state, args),
+                **self._state_backup_payload(),
             },
         )
         return OK

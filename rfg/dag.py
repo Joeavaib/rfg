@@ -10,6 +10,68 @@ def step_by_id(rm: Roadmap, sid: str) -> Step | None:
     return None
 
 
+def structure_findings(rm: Roadmap) -> list[dict]:
+    """Structural roadmap findings (V1.1, single source for doctor/plan).
+
+    Each finding is {"kind", "step", "detail"}. Kinds: duplicate-id,
+    dangling-dep, self-dep, cycle (with path). Warn-first by design:
+    callers (doctor warnings, plan --check) decide severity; nothing
+    here exits or mutates. Deterministic order: step order, then check
+    order; cycles deduplicated by canonical rotation.
+    """
+    found: list[dict] = []
+    steps = list(rm.steps or [])
+    counts: dict[str, int] = {}
+    for s in steps:
+        counts[s.id] = counts.get(s.id, 0) + 1
+    for sid, n in counts.items():
+        if n > 1:
+            found.append(
+                {
+                    "kind": "duplicate-id",
+                    "step": sid,
+                    "detail": f"step id {sid!r} declared {n} times (only the first is reachable)",
+                }
+            )
+    idset = set(counts)
+    adj: dict[str, list[str]] = {}
+    for s in steps:
+        adj.setdefault(s.id, [])
+        for d in s.depends_on or []:
+            if d == s.id:
+                found.append(
+                    {"kind": "self-dep", "step": s.id, "detail": f"step {s.id!r} depends on itself"}
+                )
+            elif d not in idset:
+                found.append(
+                    {
+                        "kind": "dangling-dep",
+                        "step": s.id,
+                        "detail": f"depends_on {d!r} matches no step id",
+                    }
+                )
+            elif d not in adj[s.id]:
+                adj[s.id].append(d)
+    seen_cycles: set[tuple] = set()
+
+    def dfs(start: str, node: str, path: list[str]) -> None:
+        for nxt in adj.get(node, []):
+            if nxt == start and len(path) >= 2:
+                core = list(path)
+                i = core.index(min(core))
+                canon = tuple(core[i:] + core[:i])
+                if canon not in seen_cycles:
+                    seen_cycles.add(canon)
+                    chain = " -> ".join(core[i:] + core[:i] + [core[i]])
+                    found.append({"kind": "cycle", "step": start, "detail": f"dependency cycle: {chain}"})
+            elif nxt not in path:
+                dfs(start, nxt, path + [nxt])
+
+    for s in steps:
+        dfs(s.id, s.id, [s.id])
+    return found
+
+
 def _dep_done(rm: Roadmap, st: State, dep_id: str) -> bool:
     dep = step_by_id(rm, dep_id)
     if dep is not None and is_implement(dep.engine):

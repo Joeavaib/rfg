@@ -470,6 +470,3 @@ class FeedbackUxTest(unittest.TestCase):
         doc = json.loads(self.rfg("doctor", "--format", "json"))["data"]
         # doctor always ok-shaped; toolchain hint lives in verify check or alternatives
         self.assertIn("checks", doc)
-
-    def test_prune_hint(self):
-        self.assertTrue(True)

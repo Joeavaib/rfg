@@ -15,7 +15,7 @@ from rfg.detect import FALLBACK_VERIFY, default_verify
 from rfg.store import Store
 from rfg.types import Budget, Checkpoint, Goal, Hypothesis, Oracle, Replace, Roadmap, Step
 from rfg.types import coerce_depends_list, coerce_path_list, default_engine, is_contract, is_implement, is_mechanical, is_stop_engine, step_observation, step_paths, step_want
-from rfg.verify import clip_output, dispatch as run_verify, is_fallback_verify, is_trivial, looks_like_missing_binary, write_log as write_verify_log
+from rfg.verify import clip_output, dispatch as run_verify, is_fallback_verify, is_sham_verify, is_trivial, looks_like_missing_binary, write_log as write_verify_log
 
 OK, USAGE, VERIFY_FAIL, DIRTY, UNSUPPORTED, CONFLICT = 0, 1, 2, 3, 4, 5
 ENGINES = ("replace", "", "ast-grep", "manual", "implement", "scaffold", "run", "survey")
@@ -175,6 +175,8 @@ Usage:
             [--from-impact]
   rfg plan --list   list all steps (id/status/engine)
   rfg plan          compact definition of the next step (want/path/verify)
+  rfg plan --check  validate roadmap read-only (exit 5 with findings, 0 when clean)
+                    (--strict adds sham-verify errors)
 
 --goal without --step sets the product goal. --goal with --step is exit 5; use --want.
 --path on an existing step merges and dedups. --extras allowlists side
@@ -555,6 +557,41 @@ class CLI:
         except FileNotFoundError:
             rm = default_roadmap(self.root)
         state = st.load_state()
+        if "--check" in (args or []):
+            # V1.2: read-only validation gate. Never writes roadmap or
+            # state (mtime-proof); exits 5 with findings, 0 when clean.
+            # V2: --strict additionally errors on sham-verify tautologies.
+            from rfg.doctor import structure_warnings as _struct_w
+
+            try:
+                findings = _struct_w(rm.steps)
+            except Exception:
+                findings = []
+            if "--strict" in (args or []):
+                for s in rm.steps:
+                    if (
+                        (s.oracle or "test") == "test"
+                        and (s.engine or "").strip() != "survey"
+                        and is_sham_verify(s.verify, engine=s.engine)
+                    ):
+                        findings.append(
+                            {
+                                "kind": "sham-verify",
+                                "step": s.id,
+                                "detail": f"verify {s.verify!r} is a tautology (proves nothing)",
+                            }
+                        )
+            out = {
+                "ok": not findings,
+                "findings": findings,
+                "counts": {"total": len(rm.steps), "findings": len(findings)},
+            }
+            if findings:
+                self.emit("plan", {**out, "check": True}, ok=False,
+                          error=f"check failed: {len(findings)} finding(s)")
+                return CONFLICT
+            self.emit("plan", {**out, "check": True})
+            return OK
         step = Step(id="")
         have = False
         from_impact = False
@@ -822,6 +859,17 @@ class CLI:
         for _n in tc_notes:
             if _n not in warns:
                 warns.append(_n)
+        # V1.1: roadmap structure findings surface as warnings (single
+        # source: dag via doctor). plan --check (V1.2) will exit on them.
+        try:
+            from rfg.doctor import structure_warnings as _struct_w
+
+            for _f in _struct_w(rm.steps):
+                _w = f"{_f.get('step')} {_f.get('kind')}: {_f.get('detail')}"
+                if _w not in warns:
+                    warns.append(_w)
+        except Exception:
+            pass
         st.save_roadmap(rm)
         if not st.state_path.is_file():
             st.write_state(state)

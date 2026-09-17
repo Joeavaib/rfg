@@ -9,6 +9,13 @@ from pathlib import Path
 
 
 def _home() -> Path:
+    try:
+        from rfg.home import resolve_home
+
+        return resolve_home(here=Path(__file__), depths=(3, 2, 1))
+    except Exception:
+        pass
+    # bootstrap fallback: package not importable yet, same table, local check
     env = os.environ.get("RFG_HOME", "").strip()
     if env:
         return Path(env).expanduser().resolve()

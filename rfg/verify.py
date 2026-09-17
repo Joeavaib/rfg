@@ -232,3 +232,23 @@ def is_weak_verify(command: str | None, engine: str | None = None) -> bool:
         return False
     markers = ("path.exists", "exists()", "os.path.exists", "test -e ", "test -f ", "test -d ")
     return any(m in s for m in markers)
+
+
+_SHAM_MARKERS = ("assert true", "asserttrue(true)", "exit 0")
+
+
+def is_sham_verify(command: str | None, engine: str | None = None) -> bool:
+    """Tautological verifies prove nothing (V2, strict layer).
+
+    `assert True` / `assertTrue(True)` / `exit 0` pass without touching
+    any code, so they are sham even though they are not trivial/weak by
+    the older markers. Survey steps are notes-only and exempt; empty
+    commands belong to the trivial layer, not sham. Targeted selection
+    (`-k`, `--deselect`, file targets) is legitimate scoping, not sham.
+    """
+    if (engine or "").strip().lower() == "survey":
+        return False
+    s = " ".join((command or "").lower().split())
+    if not s:
+        return False
+    return any(m in s for m in _SHAM_MARKERS)

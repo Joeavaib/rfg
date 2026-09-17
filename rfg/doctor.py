@@ -13,7 +13,7 @@ from rfg.detect import default_verify
 from rfg.fmtutil import TOOLS
 from rfg.store import Store
 from rfg.types import BARE_SUITE, Step, step_paths
-from rfg.verify import is_weak_verify
+from rfg.verify import is_weak_verify, is_sham_verify
 
 
 KNOWN_ENGINES = ("replace", "", "ast-grep", "manual", "implement", "scaffold", "run", "survey")
@@ -137,6 +137,8 @@ def oracle_warnings(steps: list[Step], extra: Step | None = None) -> list[str]:
             warns.append(f"{s.id} verify is a whole-suite command ({cmd.strip()})")
         if is_weak_verify(cmd):
             warns.append(f"{s.id} weak-verify (existence assert or fallback)")
+        if is_sham_verify(cmd, engine=s.engine):
+            warns.append(f"{s.id} sham-verify (tautology proves nothing)")
         paths = step_paths(s)
         if not paths:
             continue
@@ -199,6 +201,18 @@ def oracle_warnings(steps: list[Step], extra: Step | None = None) -> list[str]:
             seen.add(w)
             out.append(w)
     return out
+
+
+def structure_warnings(steps: list[Step]) -> list[dict]:
+    """Roadmap structure findings, single-sourced from dag (V1.1).
+
+    No second implementation of the checks lives here: doctor surfaces
+    these as warnings, plan --check (V1.2) exits on them.
+    """
+    from rfg.dag import structure_findings as _findings
+    from rfg.types import Roadmap as _Rm
+
+    return _findings(_Rm(id="doctor", steps=list(steps or [])))
 
 
 def toolchain_notes_for(cmds: list[tuple[str, str]], root: str | Path) -> list[str]:

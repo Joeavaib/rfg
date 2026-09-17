@@ -19,8 +19,11 @@ and mutable state in
 .PA .rfg/state.json .
 Apply runs in a git worktree. Git is the transaction system.
 .SH COMMANDS
-init, status, plan, next, apply, verify, rollback, why, impact, index,
-import-scip, mcp, edges, migrate, doctor, completion, man, version.
+init, status, plan, next, context, tick, apply, verify, land,
+rollback, claim, release, audit, baseline, repro, progress,
+digest, why, impact, index, import-scip, mcp, edges, scan,
+fuzz, sbom, boundaries, fleet, export, recipe, packs, migrate,
+doctor, completion, man, version.
 .SH EXIT CODES
 0 ok, 2 verify fail, 3 dirty, 4 unsupported, 5 conflict.
 .SH ENVIRONMENT

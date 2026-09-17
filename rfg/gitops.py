@@ -88,13 +88,47 @@ def worktree_path(root: str | Path) -> Path:
     return Path(root) / ".rfg" / "worktree"
 
 
+def prune_worktrees(dir: str | Path) -> str:
+    """Drop stale worktree registrations (paths gone). Never touches files."""
+    return _run(dir, "worktree", "prune")
+
+
+def _worktree_usable(wt: Path) -> bool:
+    """True when wt answers as a git dir (V0.1: heals broken gitdir pointers).
+
+    A `.git` file pointing at a missing `gitdir:` (e.g. stale absolute
+    path after a move) previously passed `ensure_worktree` unchecked and
+    failed later with "Kein Git-Repository". Now it counts as unusable so
+    the caller prunes and recreates instead.
+    """
+    gitf = wt / ".git"
+    if gitf.is_file():
+        try:
+            target = gitf.read_text(encoding="utf-8").strip()
+        except OSError:
+            return False
+        if target.startswith("gitdir:"):
+            target = target[len("gitdir:") :].strip()
+            if target and not Path(target).exists():
+                return False
+        try:
+            _run(wt, "rev-parse", "--is-inside-work-tree")
+        except RuntimeError:
+            return False
+        return True
+    if gitf.is_dir():
+        try:
+            _run(wt, "rev-parse", "--is-inside-work-tree")
+        except RuntimeError:
+            return False
+        return True
+    return False
+
+
 def ensure_worktree(root: str | Path) -> Path:
     wt = worktree_path(root)
-    if (wt / ".git").exists() or wt.is_dir() and (wt / "HEAD").exists():
-        # git worktree uses .git file
-        gitf = wt / ".git"
-        if gitf.exists():
-            return wt
+    if _worktree_usable(wt):
+        return wt
     if wt.exists():
         try:
             _run(root, "worktree", "remove", "--force", str(wt))
@@ -103,6 +137,10 @@ def ensure_worktree(root: str | Path) -> Path:
         import shutil
 
         shutil.rmtree(wt, ignore_errors=True)
+    try:
+        _run(root, "worktree", "prune")
+    except RuntimeError:
+        pass
     try:
         _run(root, "worktree", "add", "--detach", str(wt), "HEAD")
     except RuntimeError as e:

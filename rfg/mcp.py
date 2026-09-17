@@ -63,6 +63,7 @@ SCHEMAS = {
             "oracle": _STR,
             "edge": _STR,
             "budget": _STR,
+            "check": _BOOL,
         },
     },
     "next": {"type": "object", "properties": {"root": _ROOT}},
@@ -215,6 +216,8 @@ def call_tool(name: str, arguments: dict[str, Any], root: str) -> tuple[int, dic
             args.extend(["--extras", p])
         if arguments.get("list"):
             args.append("--list")
+        if arguments.get("check"):
+            args.append("--check")
         if arguments.get("from_impact") or arguments.get("from-impact"):
             args.append("--from-impact")
         return c.cmd_plan(args), {}

@@ -188,7 +188,7 @@ rfg does not make agents smarter. It makes them worse at silently changing too m
 - **Go, Python, JS/TS:** index, impact, replace work well.
 - **Rust:** macros → exit 4, except via `manual` / `implement`.
 - **C++:** no `compile_commands.json` → no mechanical C++ apply (exit 4); verify should be a real compiler. Recipe: `cxx-ffi-manual`.
-- The `cxx/rfg` binary is a **subset** of the Python CLI (rename core), not feature parity. Honest boundary (`python3 scripts/cxx-parity.py --boundary`): covered are init/plan/next/context/tick/apply/verify-basic/land-basic/progress/claim/rollback; **Python-only** are land gate, cross-verify, output budgets, `scan --parse`/SARIF, fleet summary, perf delta.
+- The `cxx/rfg` binary is a **subset** of the Python CLI (rename core), not feature parity. Honest boundary (`python3 scripts/cxx-parity.py --boundary`): covered are init/plan/next/context/tick/apply/verify-basic/land-basic/progress/claim/rollback; **Python-only** are Land-Gate, Cross-Verify, output budgets, `scan --parse`/SARIF, fleet summary, perf delta.
 
 Uncertainty is sharpened with a better check command, not with more magic in the replace.
 

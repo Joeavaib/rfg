@@ -7,7 +7,10 @@ def _q(s: str) -> str:
     if s == "":
         return '""'
     if any(c in s for c in ':#"\'\n') or s.startswith(" "):
-        return '"' + s.replace('"', '\\"') + '"'
+        # R5: escape backslash/quote/newline so the single-line form
+        # round-trips (raw embedded newlines corrupted wants before).
+        esc = s.replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n")
+        return '"' + esc + '"'
     return s
 
 
@@ -91,7 +94,22 @@ def marshal_roadmap(r: Roadmap) -> str:
 def _unquote(s: str) -> str:
     s = s.strip()
     if len(s) >= 2 and s[0] == s[-1] and s[0] in "\"'":
-        return s[1:-1].replace('\\"', '"')
+        q, body = s[0], s[1:-1]
+        if q == '"' and "\\" in body:
+            # R5: decode \\n/\"/\\ (escape-aware, single pass).
+            out: list[str] = []
+            i = 0
+            while i < len(body):
+                c = body[i]
+                if c == "\\" and i + 1 < len(body):
+                    nxt = body[i + 1]
+                    out.append({"n": "\n", '"': '"', "\\": "\\"}.get(nxt, nxt))
+                    i += 2
+                else:
+                    out.append(c)
+                    i += 1
+            return "".join(out)
+        return body.replace('\\"', '"')
     return s
 
 

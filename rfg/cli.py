@@ -1364,6 +1364,13 @@ class CLI:
                 timeout = 60.0
             code, out = run_verify(directory, cmd, kind, timeout=timeout, env_extra=env_extra)
         log_path = write_verify_log(self.root, sid, cmd, code, out)
+        # R4: ledger event (best-effort, ignored path, never breaks verify).
+        try:
+            from rfg import ledger as _ledger
+
+            _ledger.record_verify_event(self.root, sid, sid, code, log_path)
+        except Exception:
+            pass
         if code == 4:
             self.emit_err("verify", (out or "unsupported oracle").strip())
             return UNSUPPORTED

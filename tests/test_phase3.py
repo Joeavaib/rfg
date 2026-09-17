@@ -71,7 +71,7 @@ class Phase3Test(unittest.TestCase):
             "--path",
             "core.go",
             "--verify",
-            "true",
+            "test -n ok",
         )
         self.rfg(
             "plan",
@@ -88,7 +88,7 @@ class Phase3Test(unittest.TestCase):
             "--depends",
             "go-core",
             "--verify",
-            "true",
+            "test -n ok",
         )
         self.rfg(
             "plan",
@@ -103,7 +103,7 @@ class Phase3Test(unittest.TestCase):
             "--depends",
             "ts-front",
             "--verify",
-            "true",
+            "test -n ok",
         )
         st = json.loads(self.rfg("status", "--format", "json"))
         ids = [s["id"] for s in st["data"]["steps"]]
@@ -112,6 +112,8 @@ class Phase3Test(unittest.TestCase):
         self.assertEqual(st["data"]["steps"][2]["edge"], "cxx-ffi")
 
         dry = json.loads(self.rfg("apply", "--dry-run", "--format", "json"))
+        self.assertNotIn("risk", dry["data"])
+        dry = json.loads(self.rfg("apply", "--dry-run", "--show-risk", "--format", "json"))
         self.assertIn("risk", dry["data"])
         self.assertIn("score", dry["data"]["risk"])
         self.rfg("apply", "--format", "json")

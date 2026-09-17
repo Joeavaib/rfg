@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rfg.dev/schema/oracle.json",
+  "title": "Oracle",
+  "description": "test runs command. perf compares elapsed/metric to baseline and max_ms. debug is a repro command. security empty remains exit 4 until H5.",
+  "type": "object",
+  "required": ["kind"],
+  "additionalProperties": false,
+  "properties": {
+    "kind": {
+      "type": "string",
+      "enum": ["test", "perf", "debug", "security"]
+    },
+    "command": { "type": "string" },
+    "max_ms": { "type": "number", "minimum": 0 },
+    "max_ratio": { "type": "number", "minimum": 0 }
+  }
+}

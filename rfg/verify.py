@@ -1,18 +1,234 @@
 from __future__ import annotations
 
+import os
+import shlex
+import shutil
 import subprocess
 from pathlib import Path
 
 
-def run(dir: str | Path, command: str) -> tuple[int, str]:
-    if not command.strip():
-        return 0, ""
-    r = subprocess.run(
-        command,
-        cwd=dir,
-        shell=True,
-        capture_output=True,
-        text=True,
+def load_env(root: str | Path) -> dict[str, str]:
+    """Read .rfg/env (KEY=VAL per line) for toolchain-local setups.
+
+    The verify shell inherits the rfg process env, not the caller's
+    interactive session (e.g. PATH exports in /tmp/opencode/...).  A
+    checked-in .rfg/env lets a step declare JAVA_HOME/PATH without
+    embedding `export ... &&` in every verify command.  Values support
+    $VAR/${VAR} expansion against the current process env plus earlier
+    lines in the same file.  Missing file -> {}.
+    """
+    p = Path(root) / ".rfg" / "env"
+    try:
+        text = p.read_text(encoding="utf-8")
+    except OSError:
+        return {}
+    merged: dict[str, str] = {}
+    for raw in text.splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line.startswith("export "):
+            line = line[len("export ") :].strip()
+        if "=" not in line:
+            continue
+        key, _, val = line.partition("=")
+        key = key.strip()
+        val = val.strip()
+        if len(val) >= 2 and val[0] == val[-1] and val[0] in "\"'":
+            val = val[1:-1]
+        if not key or not key.replace("_", "").isalnum():
+            continue
+        # expand against process env + earlier lines so PATH+= works
+        base = dict(os.environ)
+        base.update(merged)
+        val = os.path.expandvars(val)
+        # os.path.expandvars uses os.environ only; re-expand $NAME from base
+        # for keys not in os.environ (simple second pass for $PATH style).
+        for k, v in base.items():
+            if f"${k}" in val or "${" + k + "}" in val:
+                val = val.replace(f"${k}", v).replace("${" + k + "}", v)
+        merged[key] = val
+    return merged
+
+
+def env_path_which(root: str | Path, binary: str) -> str | None:
+    """Resolve binary via .rfg/env PATH (None when absent/unresolvable).
+
+    Doctor and verify hints use this so a toolchain that lives behind
+    `.rfg/env` (user-local mvn, cargo with RUSTUP_HOME/CARGO_HOME, ...)
+    is reported as resolvable instead of missing.
+    """
+    try:
+        env = load_env(root)
+    except Exception:
+        return None
+    path_val = (env.get("PATH") or "").strip()
+    if not path_val or not binary:
+        return None
+    try:
+        found = shutil.which(binary.strip().split("/")[-1], path=path_val)
+    except Exception:
+        return None
+    return found
+
+
+def looks_like_missing_binary(code: int, output: str) -> bool:
+    """Exit 127 or shell 'command not found' means the binary is absent."""
+    if code == 127:
+        return True
+    low = (output or "").lower()
+    return "command not found" in low or "not recognized as an internal" in low
+
+
+def env_hint_for_failure(code: int, output: str, command: str, step_id: str = "") -> str:
+    """Remediation hint for 127/command-not-found verify failures.
+
+    Always names the binary and step and points at `.rfg/env`, because
+    verify shells inherit the rfg process env, not the caller's session
+    exports (Meridian: mvn, cargo+RUSTUP_HOME/CARGO_HOME).
+    """
+    if not looks_like_missing_binary(code, output):
+        return ""
+    try:
+        toks = shlex.split(command or "")
+    except ValueError:
+        toks = (command or "").split()
+    binary = ""
+    for tok in toks:
+        t = tok.strip()
+        if not t or t.startswith("-") or "=" in t or t in ("export", "cd", "bash", "sh"):
+            continue
+        binary = t.split("/")[-1]
+        break
+    where = f" (step {step_id})" if step_id else ""
+    return (
+        f"hint: verify {command!r}{where} failed with exit {code} "
+        f"(command not found: {binary or 'unknown binary'}); "
+        "declare the toolchain in .rfg/env (e.g. PATH=<dir>:$PATH, "
+        "JAVA_HOME, RUSTUP_HOME/CARGO_HOME) so verify shells see it"
     )
+
+
+def related_step_ids(steps, step) -> list[str]:
+    """Stufe 1 cross-verify scope: direct dependents + path overlap.
+
+    - dependents: steps with step.id in their depends_on
+    - overlap: steps sharing any entry of step_paths()
+    Self is excluded. Order: dependents first, then overlap, deduped.
+    """
+    try:
+        from rfg.types import step_paths as _paths
+    except Exception:
+        return []
+    me = getattr(step, "id", "")
+    mine = set(_paths(step) or [])
+    dependents: list[str] = []
+    overlap: list[str] = []
+    for s in steps or []:
+        sid = getattr(s, "id", "")
+        if not sid or sid == me:
+            continue
+        if me and me in (getattr(s, "depends_on", None) or []):
+            dependents.append(sid)
+            continue
+        try:
+            theirs = set(_paths(s) or [])
+        except Exception:
+            theirs = set()
+        if mine and theirs and (mine & theirs):
+            overlap.append(sid)
+    seen: set[str] = set()
+    out: list[str] = []
+    for sid in dependents + overlap:
+        if sid not in seen:
+            seen.add(sid)
+            out.append(sid)
+    return out[:10]
+
+
+def is_trivial(command: str | None) -> bool:
+    """true/empty is not a real verify command."""
+    s = (command or "").strip().lower()
+    return s in ("", "true")
+
+
+def dispatch(
+    dir: str | Path,
+    command: str,
+    kind: str = "test",
+    timeout: float | None = 60.0,
+    env_extra: dict[str, str] | None = None,
+) -> tuple[int, str]:
+    """H1 test oracle runs command. perf/debug/security without a command stay exit 4."""
+    kind = (kind or "test").strip().lower() or "test"
+    if kind not in ("test", "perf", "debug", "security"):
+        return 4, f"unsupported oracle kind: {kind}"
+    if kind != "test" and not (command or "").strip():
+        return 4, f"unsupported: {kind} oracle stub (no command)"
+    if kind == "security" and not (command or "").strip():
+        return 4, "unsupported: security oracle stub (no command until H5)"
+    return run(dir, command, timeout=timeout, env_extra=env_extra)
+
+
+def run(
+    dir: str | Path,
+    command: str,
+    timeout: float | None = 60.0,
+    env_extra: dict[str, str] | None = None,
+) -> tuple[int, str]:
+    if is_trivial(command):
+        return 4, "unsupported: trivial verify (need a real command, not true/empty)"
+    env = dict(os.environ)
+    if env_extra:
+        env.update(env_extra)
+    try:
+        r = subprocess.run(
+            command,
+            cwd=dir,
+            shell=True,
+            capture_output=True,
+            text=True,
+            timeout=timeout if timeout and timeout > 0 else None,
+            env=env,
+        )
+    except subprocess.TimeoutExpired:
+        return 2, "verify timeout"
     out = (r.stdout or "") + (r.stderr or "")
     return r.returncode, out
+
+
+OUTPUT_LIMIT = 2000
+
+
+def clip_output(text: str, limit: int = OUTPUT_LIMIT) -> str:
+    """Tail of command output for MCP/CLI JSON. Full text stays in the verify log."""
+    s = text or ""
+    if len(s) <= limit:
+        return s
+    keep = max(0, limit - 36)
+    return "…[truncated, see log]…\n" + s[-keep:]
+
+
+def write_log(root: str | Path, step_id: str, command: str, code: int, output: str) -> str:
+    p = Path(root) / ".rfg" / "verify" / f"{step_id}.log"
+    p.parent.mkdir(parents=True, exist_ok=True)
+    body = f"$ {command}\nexit {code}\n\n{output or ''}"
+    if not body.endswith("\n"):
+        body += "\n"
+    p.write_text(body, encoding="utf-8")
+    return str(p)
+
+
+def is_fallback_verify(command: str | None) -> bool:
+    return (command or "").strip() in ("", "true", "test -n ok")
+
+
+def is_weak_verify(command: str | None, engine: str | None = None) -> bool:
+    s = (command or "").lower()
+    if is_fallback_verify(command) or is_trivial(command):
+        return True
+    # survey steps are notes-only; ls/grep checks are appropriate, not weak
+    if (engine or "").strip().lower() == "survey":
+        return False
+    markers = ("path.exists", "exists()", "os.path.exists", "test -e ", "test -f ", "test -d ")
+    return any(m in s for m in markers)

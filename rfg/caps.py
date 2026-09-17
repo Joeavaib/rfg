@@ -7,9 +7,11 @@ from rfg import lsp
 
 def has_compile_commands(root: str | Path) -> bool:
     root = Path(root)
-    return (root / "compile_commands.json").is_file() or (
-        root / "build" / "compile_commands.json"
-    ).is_file()
+    return (
+        (root / "compile_commands.json").is_file()
+        or (root / "build" / "compile_commands.json").is_file()
+        or (root / "cxx" / "compile_commands.json").is_file()
+    )
 
 
 def rust_has_macros(text: str) -> bool:

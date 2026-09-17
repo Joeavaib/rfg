@@ -1,0 +1,29 @@
+version: 3
+id: recipe-security
+hypothesis:
+  id: h-sec
+  statement: Security campaign with scan sbom boundaries
+goal:
+  id: g-sec
+  statement: Gates only; no exploit help
+  profile: security
+steps:
+  - id: sbom
+    title: Inventory
+    engine: manual
+    oracle: security
+  - id: scan
+    title: Scan command or presence
+    depends_on:
+      - sbom
+    engine: manual
+    oracle: security
+  - id: boundaries
+    title: FFI trust boundaries
+    depends_on:
+      - sbom
+    engine: manual
+    oracle: security
+oracles:
+  - kind: security
+    command: test -n ok

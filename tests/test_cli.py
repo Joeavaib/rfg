@@ -73,7 +73,7 @@ class CLITest(unittest.TestCase):
             "--path",
             "user.go",
             "--verify",
-            "true",
+            "test -n ok",
         )
         self.rfg(
             "plan",
@@ -90,7 +90,7 @@ class CLITest(unittest.TestCase):
             "--path",
             "user.go",
             "--verify",
-            "true",
+            "test -n ok",
         )
         self.rfg(
             "plan",
@@ -124,7 +124,7 @@ class CLITest(unittest.TestCase):
             "--path",
             "user.go",
             "--verify",
-            "true",
+            "test -n ok",
         )
 
         st = json.loads(self.rfg("status", "--format", "json"))
@@ -136,9 +136,10 @@ class CLITest(unittest.TestCase):
 
         dry = self.rfg("apply", "--dry-run", "--format", "json")
         denv = json.loads(dry)
-        diff = denv.get("diff") or denv["data"].get("diff") or ""
-        self.assertTrue(diff.strip(), dry)
-        self.assertIn("UserID", diff)
+        self.assertNotIn("diff", denv)
+        self.assertNotIn("diff", denv["data"])
+        self.assertGreater(denv["data"]["hits"], 0)
+        self.assertTrue(denv["data"]["files"])
 
         self.rfg("apply", "--format", "json")
         wt_user = Path(self.td) / ".rfg" / "worktree" / "user.go"
@@ -162,7 +163,7 @@ class CLITest(unittest.TestCase):
         # previous step remains
         self.assertIn("struct{", wt_user.read_text())
 
-        imp = json.loads(self.rfg("impact", "--format", "json"))
+        imp = json.loads(self.rfg("impact", "--files", "--format", "json"))
         self.assertGreater(imp["data"]["hits"], 0)
         self.assertTrue(imp["data"]["files"])
         self.assertTrue(imp["data"]["files"][0]["path"])
@@ -227,7 +228,7 @@ class YamlTest(unittest.TestCase):
                 Step(
                     id="s1",
                     title="first",
-                    replace=Replace(frm="UserID", to="UID", paths=["user.go"]),
+                    replace=Replace(from_pat="UserID", to="UID", paths=["user.go"]),
                 ),
                 Step(id="s2", title="second", depends_on=["s1"], verify="true"),
             ],
@@ -235,7 +236,7 @@ class YamlTest(unittest.TestCase):
         got = unmarshal_roadmap(marshal_roadmap(r))
         self.assertEqual(got.id, "roadmap-1")
         self.assertEqual(got.steps[1].depends_on, ["s1"])
-        self.assertEqual(got.steps[0].replace.frm, "UserID")
+        self.assertEqual(got.steps[0].replace.from_pat, "UserID")
 
 
 if __name__ == "__main__":

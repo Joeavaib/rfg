@@ -18,7 +18,7 @@ def score(step: Step, *, hits: int, diff_lines: int, edges: list[dict], macros: 
         s += 25
     if cpp_no_db:
         s += 20
-    if step.engine == "manual":
+    if step.engine in ("manual", "implement"):
         s += 10
     s = min(100, s)
     band = "low" if s < 30 else "medium" if s < 60 else "high"

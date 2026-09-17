@@ -3,7 +3,15 @@
 rfg \- lead a multi-step refactor locally
 .SH SYNOPSIS
 .B rfg
-[\fB--format\fR json] [\fB--root\fR DIR] \fICOMMAND\fR
+[\fB--format\fR json] [\fB--root\fR DIR] [\fB--show-risk\fR] [\fB--max-chars\fR N] \fICOMMAND\fR
+.SH OUTPUT BUDGETS
+.TP
+.B --show-risk
+Include risk/format blocks in apply/next output. Default is slim.
+.TP
+.B --max-chars N
+Cap agent-facing output (context, digest, export, impact). Default 2000,
+hard cap 8000. Capped payloads carry truncated/chars/token_estimate.
 .SH DESCRIPTION
 Stores a versioned roadmap in
 .PA .rfg/roadmap.yaml
@@ -22,5 +30,19 @@ If set, refuse optional network features (none are used by default).
 .TP
 .B RFG_TELEMETRY
 Opt-in local telemetry log at .rfg/telemetry.log. Never sent.
+.TP
+.B RFG_VERIFY_TIMEOUT
+Seconds per verify command (default 60).
+.TP
+.B .rfg/env
+Optional KEY=VAL file merged into every verify environment (e.g. PATH
+with user-local mvn/go/cargo). Supports $VAR expansion.
+.SH PLAN FLAGS
+.TP
+.B plan --list
+List all steps instead of only the next compact definition.
+.TP
+.B plan --extras FILE
+Allowlist side artefacts (e.g. rfgfeedback.md) without polluting path[].
 .SH SEE ALSO
 docs/INTEGRATION.md

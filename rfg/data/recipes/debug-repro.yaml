@@ -1,0 +1,17 @@
+version: 3
+id: recipe-debug
+hypothesis:
+  id: h-debug
+  statement: First-class bug repro
+goal:
+  id: g-debug
+  statement: Repro command is the debug oracle
+  profile: debug
+steps:
+  - id: repro
+    title: Run repro
+    engine: manual
+    oracle: debug
+oracles:
+  - kind: debug
+    command: test -n ok

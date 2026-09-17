@@ -1,0 +1,27 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Write|StrReplace|search_replace",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 scripts/rfg-hook-pretool.py",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 scripts/rfg-hook-stop.py",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}

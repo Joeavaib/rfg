@@ -1,0 +1,11 @@
+[
+  {"directory": "cxx", "file": "main.cc", "command": "c++ -std=c++17 -Wall -Wextra -c main.cc -o main.o"},
+  {"directory": "cxx", "file": "yaml.cc", "command": "c++ -std=c++17 -Wall -Wextra -c yaml.cc -o yaml.o"},
+  {"directory": "cxx", "file": "dag.cc", "command": "c++ -std=c++17 -Wall -Wextra -c dag.cc -o dag.o"},
+  {"directory": "cxx", "file": "cli.cc", "command": "c++ -std=c++17 -Wall -Wextra -c cli.cc -o cli.o"},
+  {"directory": "cxx", "file": "util.cc", "command": "c++ -std=c++17 -Wall -Wextra -c util.cc -o util.o"},
+  {"directory": "cxx", "file": "git.cc", "command": "c++ -std=c++17 -Wall -Wextra -c git.cc -o git.o"},
+  {"directory": "cxx", "file": "apply.cc", "command": "c++ -std=c++17 -Wall -Wextra -c apply.cc -o apply.o"},
+  {"directory": "cxx", "file": "verify.cc", "command": "c++ -std=c++17 -Wall -Wextra -c verify.cc -o verify.o"},
+  {"directory": "cxx", "file": "context.cc", "command": "c++ -std=c++17 -Wall -Wextra -c context.cc -o context.o"}
+]

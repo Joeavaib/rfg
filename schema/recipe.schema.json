@@ -1,0 +1,7 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rfg.dev/schema/recipe.json",
+  "title": "Recipe",
+  "description": "Bundled or project-local roadmap template. Same shape as roadmap.yaml.",
+  "$ref": "roadmap.json"
+}

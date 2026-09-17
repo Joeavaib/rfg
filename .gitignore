@@ -1,0 +1,22 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.venv/
+venv/
+
+# C++ build
+*.o
+cxx/rfg
+examples/cxx/cxx_check
+
+# rfg runtime (local campaigns)
+.rfg/
+
+# Dogfood clones (not product source)
+examples/foreign/
+
+# Editor / OS
+.DS_Store
+*~

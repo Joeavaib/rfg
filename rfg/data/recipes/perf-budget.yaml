@@ -1,0 +1,25 @@
+version: 3
+id: recipe-perf
+hypothesis:
+  id: h-perf
+  statement: Guard a hot path with a perf oracle
+goal:
+  id: g-perf
+  statement: Fail verify when metric exceeds max_ms or baseline ratio
+  profile: perf
+steps:
+  - id: capture-baseline
+    title: Record baseline
+    engine: manual
+    oracle: perf
+  - id: enforce
+    title: Verify against budget
+    depends_on:
+      - capture-baseline
+    engine: manual
+    oracle: perf
+oracles:
+  - kind: perf
+    command: test -n ok
+    max_ms: 1000
+    max_ratio: 1.2

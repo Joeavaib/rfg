@@ -1,0 +1,10 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rfg.dev/schema/budget.json",
+  "title": "Budget",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "max_applies": { "type": "integer", "minimum": 0 }
+  }
+}

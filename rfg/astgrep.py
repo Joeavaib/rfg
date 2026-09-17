@@ -19,9 +19,9 @@ def run(root: str | Path, step: Step, *, dry: bool) -> tuple[str, int]:
     exe = binary()
     if not exe:
         raise FileNotFoundError("ast-grep not installed")
-    if step.replace is None or not step.replace.frm:
+    if step.replace is None or not step.replace.from_pat:
         raise ValueError("ast-grep step needs replace.from as pattern")
-    args = [exe, "run", "-p", step.replace.frm, "--json=compact"]
+    args = [exe, "run", "-p", step.replace.from_pat, "--json=compact"]
     if step.replace.to:
         args.extend(["-r", step.replace.to])
     if dry:

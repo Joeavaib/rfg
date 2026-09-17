@@ -3,33 +3,166 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 from typing import Any
 
+from pathlib import Path
+
+from rfg import __version__
 from rfg.cli import CLI, OK
+from rfg.types import coerce_depends_list, coerce_path_list
+
+# Same verbs as the CLI driver loop. Catalog stays behind RFG_MCP_ALL=1.
+CORE_TOOLS = (
+    "init",
+    "plan",
+    "next",
+    "context",
+    "tick",
+    "apply",
+    "verify",
+    "land",
+    "rollback",
+    "claim",
+    "release",
+    "progress",
+    "doctor",
+    "recipe",
+    "why",
+    "impact",
+)
+
+_STR = {"type": "string"}
+_BOOL = {"type": "boolean"}
+_ROOT = {"type": "string", "description": "Repo root (same as CLI --root; else RFG_ROOT or server cwd)"}
+SCHEMAS = {
+    "init": {"type": "object", "properties": {"root": _ROOT}},
+    "plan": {
+        "type": "object",
+        "properties": {
+            "root": _ROOT,
+            "step": _STR,
+            "title": _STR,
+            "from": _STR,
+            "to": _STR,
+            "path": {"oneOf": [_STR, {"type": "array", "items": _STR}]},
+            "extras": {"oneOf": [_STR, {"type": "array", "items": _STR}]},
+            "list": _BOOL,
+            "engine": _STR,
+            "verify": _STR,
+            "depends": {"oneOf": [_STR, {"type": "array", "items": _STR}]},
+            "symbol": _STR,
+            "goal": _STR,
+            "want": _STR,
+            "hypothesis": _STR,
+            "profile": _STR,
+            "acceptance": _STR,
+            "from_impact": _BOOL,
+            "diff_budget": _STR,
+            "oracle": _STR,
+            "edge": _STR,
+            "budget": _STR,
+        },
+    },
+    "next": {"type": "object", "properties": {"root": _ROOT}},
+    "context": {"type": "object", "properties": {"root": _ROOT, "step": _STR, "sources": _BOOL}},
+    "tick": {"type": "object", "properties": {"root": _ROOT, "step": _STR}},
+    "apply": {
+        "type": "object",
+        "properties": {
+            "root": _ROOT,
+            "step": _STR,
+            "dry_run": _BOOL,
+            "agent": _STR,
+        },
+    },
+    "release": {"type": "object", "properties": {"root": _ROOT}},
+    "verify": {"type": "object", "properties": {"root": _ROOT, "step": _STR}},
+    "land": {"type": "object", "properties": {"root": _ROOT}},
+    "rollback": {"type": "object", "properties": {"root": _ROOT}},
+    "claim": {"type": "object", "properties": {"root": _ROOT, "step": _STR, "agent": _STR}},
+    "progress": {"type": "object", "properties": {"root": _ROOT}},
+    "doctor": {"type": "object", "properties": {"root": _ROOT}},
+    "recipe": {
+        "type": "object",
+        "properties": {
+            "root": _ROOT,
+            "action": _STR,
+            "id": _STR,
+            "path": _STR,
+            "verify": _STR,
+            "from": _STR,
+            "to": _STR,
+            "goal": _STR,
+            "profile": _STR,
+            "depends": _STR,
+            "steps": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "id": _STR,
+                        "path": {"oneOf": [_STR, {"type": "array", "items": _STR}]},
+                        "verify": _STR,
+                        "depends": {"oneOf": [_STR, {"type": "array", "items": _STR}]},
+                        "want": _STR,
+                        "engine": _STR,
+                    },
+                },
+            },
+        },
+    },
+    "why": {"type": "object", "properties": {"root": _ROOT, "step": _STR}},
+    "impact": {"type": "object", "properties": {"root": _ROOT, "symbol": _STR, "files": _BOOL}},
+}
 
 TOOLS = [
-    {"name": "init", "description": "Create .rfg roadmap"},
+    {"name": "init", "description": "Create .rfg store"},
     {"name": "status", "description": "Roadmap DAG status"},
-    {"name": "plan", "description": "Add or update a step"},
-    {"name": "next", "description": "Next free step"},
-    {"name": "apply", "description": "Apply a step (dry_run optional)"},
-    {"name": "verify", "description": "Run verify command"},
-    {"name": "rollback", "description": "Rollback last checkpoint"},
+    {"name": "plan", "description": "Campaign goal without step; step want/path/verify with --step. Does not overwrite the product goal."},
+    {"name": "next", "description": "Next step plus ready[] and a recommend (critical path / smallest verify)"},
+    {"name": "context", "description": "Step contract (want, path, missing, verify). Cousins only with sources=true."},
+    {"name": "tick", "description": "Replace: apply+verify. implement/manual: claim in_progress + contract. Optional step= overrides next/recommend."},
+    {"name": "apply", "description": "Apply a step. No agent = same client as the claim. implement/manual: copy path[] and extra root edits into the worktree."},
+    {"name": "verify", "description": "Run verify"},
+    {"name": "land", "description": "Copy worktree onto root and re-verify"},
+    {"name": "rollback", "description": "Restore last checkpoint"},
+    {"name": "claim", "description": "Lock a step"},
+    {"name": "release", "description": "Drop the current step claim"},
+    {"name": "audit", "description": "Recent audit.jsonl events"},
+    {"name": "baseline", "description": "Capture perf oracle baseline"},
+    {"name": "repro", "description": "Run debug oracle / write repro.log"},
+    {"name": "progress", "description": "Goal, counts, exceptions"},
+    {"name": "digest", "description": "Write .rfg/digest.json nightly handoff"},
     {"name": "why", "description": "Why a step is ready or blocked"},
-    {"name": "impact", "description": "Symbol/file hit counts"},
+    {"name": "impact", "description": "Hit counts. files=true to list paths."},
     {"name": "index", "description": "Rebuild incremental index"},
     {"name": "edges", "description": "Cross-language edges (cgo, pyo3, napi)"},
-    {"name": "doctor", "description": "Environment and schema checks"},
+    {"name": "scan", "description": "Security scan command or scanner presence (no exploits)"},
+    {"name": "fuzz", "description": "Fuzzer presence or configured fuzz command"},
+    {"name": "sbom", "description": "Write CycloneDX-lite inventory to .rfg/sbom.json"},
+    {"name": "boundaries", "description": "FFI trust boundaries"},
+    {"name": "fleet", "description": "Progress across local fleet.yaml repos"},
+    {"name": "export", "description": "Write offline batch-changes.yaml or static dashboard.html"},
+    {"name": "recipe", "description": "List/show/apply bundled roadmap recipes"},
+    {"name": "packs", "description": "List packs; paid enable is unsupported"},
+    {"name": "doctor", "description": "Environment and schema checks. Extra verbs (status, audit, …) need RFG_MCP_ALL=1"},
     {"name": "migrate", "description": "Migrate roadmap schema"},
 ]
 
 
 def _cli(root: str) -> CLI:
-    return CLI(root, json_out=True, dry=False)
+    return CLI(root, json_out=True, dry=False, compact=True)
+
+
+def _tool_root(arguments: dict[str, Any], default: str) -> str:
+    r = arguments.get("root") or os.environ.get("RFG_ROOT") or default
+    return str(r)
 
 
 def call_tool(name: str, arguments: dict[str, Any], root: str) -> tuple[int, dict]:
+    root = _tool_root(arguments, root)
     c = _cli(root)
     args = []
     if name == "init":
@@ -38,33 +171,86 @@ def call_tool(name: str, arguments: dict[str, Any], root: str) -> tuple[int, dic
         return c.cmd_status(), {}
     if name == "next":
         return c.cmd_next(), {}
+    if name == "context":
+        if arguments.get("step"):
+            args.append(str(arguments["step"]))
+        if arguments.get("sources"):
+            args.append("--sources")
+        return c.cmd_context(args), {}
+    if name == "tick":
+        if arguments.get("step"):
+            args.append(str(arguments["step"]))
+        if arguments.get("agent"):
+            args.extend(["--agent", str(arguments["agent"])])
+        return c.cmd_tick(args), {}
     if name == "plan":
         for k, flag in (
             ("step", "--step"),
             ("title", "--title"),
-            ("frm", "--from"),
+            ("from_pat", "--from"),
             ("from", "--from"),
             ("to", "--to"),
-            ("depends", "--depends"),
             ("verify", "--verify"),
             ("hypothesis", "--hypothesis"),
             ("symbol", "--symbol"),
-            ("path", "--path"),
+            ("engine", "--engine"),
+            ("goal", "--goal"),
+            ("want", "--want"),
+            ("profile", "--profile"),
+            ("acceptance", "--acceptance"),
+            ("diff_budget", "--diff-budget"),
+            ("oracle", "--oracle"),
+            ("edge", "--edge"),
+            ("budget", "--budget"),
         ):
             if arguments.get(k):
                 args.extend([flag, str(arguments[k])])
+        dep = arguments.get("depends")
+        deps = coerce_depends_list(dep)
+        if deps:
+            args.extend(["--depends", ",".join(deps)])
+        for p in coerce_path_list(arguments.get("path")):
+            args.extend(["--path", p])
+        for p in coerce_path_list(arguments.get("extras")):
+            args.extend(["--extras", p])
+        if arguments.get("list"):
+            args.append("--list")
+        if arguments.get("from_impact") or arguments.get("from-impact"):
+            args.append("--from-impact")
         return c.cmd_plan(args), {}
     if name == "apply":
         c.dry = bool(arguments.get("dry_run"))
         if arguments.get("step"):
             args.append(str(arguments["step"]))
+        if arguments.get("agent"):
+            args.extend(["--agent", str(arguments["agent"])])
         return c.cmd_apply(args), {}
     if name == "verify":
         if arguments.get("step"):
             args.append(str(arguments["step"]))
         return c.cmd_verify(args), {}
+    if name == "land":
+        return c.cmd_land([]), {}
     if name == "rollback":
         return c.cmd_rollback(["last"]), {}
+    if name == "claim":
+        if arguments.get("agent"):
+            args.extend(["--agent", str(arguments["agent"])])
+        if arguments.get("step"):
+            args.append(str(arguments["step"]))
+        return c.cmd_claim(args), {}
+    if name == "release":
+        return c.cmd_release([]), {}
+    if name == "audit":
+        return c.cmd_audit([]), {}
+    if name == "baseline":
+        return c.cmd_baseline([]), {}
+    if name == "repro":
+        return c.cmd_repro([]), {}
+    if name == "progress":
+        return c.cmd_progress([]), {}
+    if name == "digest":
+        return c.cmd_digest([]), {}
     if name == "why":
         if arguments.get("step"):
             args.append(str(arguments["step"]))
@@ -72,11 +258,64 @@ def call_tool(name: str, arguments: dict[str, Any], root: str) -> tuple[int, dic
     if name == "impact":
         if arguments.get("symbol"):
             args.extend(["--symbol", str(arguments["symbol"])])
+        if arguments.get("files"):
+            args.append("--files")
         return c.cmd_impact(args), {}
     if name == "index":
         return c.cmd_index([]), {}
     if name == "edges":
         return c.cmd_edges([]), {}
+    if name == "scan":
+        return c.cmd_scan([]), {}
+    if name == "fuzz":
+        return c.cmd_fuzz([]), {}
+    if name == "sbom":
+        return c.cmd_sbom([]), {}
+    if name == "boundaries":
+        return c.cmd_boundaries([]), {}
+    if name == "fleet":
+        act = []
+        if arguments.get("action"):
+            act.append(str(arguments["action"]))
+        return c.cmd_fleet(act), {}
+    if name == "export":
+        return c.cmd_export([str(arguments.get("kind") or "batch")]), {}
+    if name == "recipe":
+        act = [str(arguments.get("action") or "list")]
+        if arguments.get("id"):
+            act.append(str(arguments["id"]))
+        for k, flag in (
+            ("verify", "--verify"),
+            ("from", "--from"),
+            ("to", "--to"),
+            ("goal", "--goal"),
+            ("profile", "--profile"),
+        ):
+            if arguments.get(k):
+                act.extend([flag, str(arguments[k])])
+        for p in coerce_path_list(arguments.get("path")):
+            act.extend(["--path", p])
+        steps = arguments.get("steps")
+        if isinstance(steps, list) and str(arguments.get("id") or "") == "feature-campaign":
+            for row in steps:
+                if not isinstance(row, dict):
+                    continue
+                sid = str(row.get("id") or "")
+                path = ",".join(coerce_path_list(row.get("path")))
+                ver = str(row.get("verify") or "")
+                act.extend(["--step", f"{sid}:{path}:{ver}"])
+                deps = coerce_depends_list(row.get("depends"))
+                for d in deps:
+                    act.extend(["--depends", f"{sid}:{d}"])
+                if row.get("want"):
+                    act.extend(["--want", str(row["want"])])
+        elif arguments.get("depends"):
+            deps = coerce_depends_list(arguments["depends"])
+            if deps:
+                act.extend(["--depends", ",".join(deps)])
+        return c.cmd_recipe(act), {}
+    if name == "packs":
+        return c.cmd_packs([]), {}
     if name == "doctor":
         return c.cmd_doctor([]), {}
     if name == "migrate":
@@ -94,19 +333,29 @@ def handle(msg: dict, root: str) -> dict:
             "result": {
                 "protocolVersion": "2024-11-05",
                 "capabilities": {"tools": {}},
-                "serverInfo": {"name": "rfg", "version": "1.0.0"},
+                "serverInfo": {
+                    "name": "rfg",
+                    "version": __version__,
+                    "home": str(Path(__file__).resolve().parent.parent),
+                },
             },
         }
     if method == "tools/list":
-        tools = [
-            {
-                "name": t["name"],
-                "description": t["description"],
-                "inputSchema": {"type": "object"},
-            }
-            for t in TOOLS
-        ]
-        return {"jsonrpc": "2.0", "id": mid, "result": {"tools": tools}}
+        listed = TOOLS if os.environ.get("RFG_MCP_ALL") == "1" else [t for t in TOOLS if t["name"] in CORE_TOOLS]
+        tools = []
+        for t in listed:
+            schema = SCHEMAS.get(t["name"]) or {"type": "object", "properties": {}}
+            props = dict(schema.get("properties") or {})
+            if "root" not in props:
+                props = {"root": _ROOT, **props}
+            tools.append(
+                {
+                    "name": t["name"],
+                    "description": t["description"],
+                    "inputSchema": {**schema, "type": "object", "properties": props},
+                }
+            )
+        return {"jsonrpc": "2.0", "id": mid, "result": {"tools": tools, "server": {"name": "rfg", "version": __version__}, "serverVersion": __version__}}
     if method == "tools/call":
         params = msg.get("params") or {}
         name = params.get("name")
@@ -116,6 +365,7 @@ def handle(msg: dict, root: str) -> dict:
         from contextlib import redirect_stdout
 
         buf = io.StringIO()
+        os.environ.setdefault("RFG_AGENT", "agent")
         with redirect_stdout(buf):
             code, _ = call_tool(name, arguments, root)
         text = buf.getvalue()
@@ -168,6 +418,7 @@ def _read_lsp(buf) -> dict | None:
 
 
 def serve(stdin=None, stdout=None, root: str | None = None) -> None:
+    os.environ.setdefault("RFG_AGENT", "agent")
     stdin = stdin or sys.stdin
     stdout = stdout or sys.stdout
     root = root or "."

@@ -1,0 +1,12 @@
+{
+  "name": "rfg",
+  "description": "Local refactor driver: next/context/tick",
+  "owner": { "name": "rfg" },
+  "plugins": [
+    {
+      "name": "rfg",
+      "description": "Lead refactors with a step DAG, worktree apply, and oracles",
+      "source": { "source": "local", "path": "./plugin/rfg" }
+    }
+  ]
+}

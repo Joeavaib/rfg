@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rfg.dev/schema/goal.json",
+  "title": "Goal",
+  "description": "PM contract. Agents do not invent acceptance.",
+  "type": "object",
+  "required": ["id", "statement"],
+  "additionalProperties": false,
+  "properties": {
+    "id": { "type": "string", "minLength": 1 },
+    "statement": { "type": "string" },
+    "profile": {
+      "type": "string",
+      "enum": ["refactor", "feature", "perf", "debug", "security"]
+    },
+    "acceptance": {
+      "type": "array",
+      "items": { "type": "string" }
+    }
+  }
+}

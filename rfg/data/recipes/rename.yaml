@@ -1,0 +1,23 @@
+version: 3
+id: recipe-rename
+hypothesis:
+  id: h1
+  statement: Rename a symbol across listed files
+  symbol: Symbol
+goal:
+  id: g1
+  statement: Rename a symbol with mechanical replace and a real verify
+  profile: refactor
+  acceptance:
+    - next names the first rename step
+verify: test -n ok
+oracles:
+  - kind: test
+    command: test -n ok
+steps:
+  - id: rename
+    title: Identifier replace
+    engine: replace
+    replace:
+      from: "{{from}}"
+      to: "{{to}}"

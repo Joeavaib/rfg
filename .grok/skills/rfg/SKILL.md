@@ -1,27 +1,22 @@
 ---
 name: rfg
-description: Lead a multi-step refactor with the local rfg CLI (roadmap, impact, apply in a git worktree, verify, rollback). Use when the user says refactor, rename across files, rfg, /rfg, next safe step, or wants a verify/rollback loop instead of one big patch.
+description: Lead a multi-step refactor or feature with rfg (roadmap DAG, worktree apply, verify, rollback). Use when the user says refactor, rename, rfg, /rfg, next safe step, or wants a verify/rollback loop.
 ---
 
 # rfg
 
-Drive refactors through `python3 rfg.py --format json` (or MCP tools `rfg__*` if the `rfg` server is connected). Do not hand-edit a mass rename when rfg can apply a step.
+MCP = CLI (`root` / `RFG_ROOT`). Prefer MCP. Else `python3 rfg.py --format json`. Do not mass-edit a rename. Do not read the tree; `context` is the window. Core: `plan` `next` `tick` `apply` `verify` `land`.
+
+`doctor` first (git; `module` = binary). Product goal once: `plan --goal` without `--step`. Step: `--want --path --verify --depends` (missing path ok). Feature: `recipe apply feature-module` or `feature-campaign --step id:path:verify`.
 
 ## Loop
 
-1. `doctor` then `index` if needed.
-2. `init` once; `plan --hypothesis … --symbol …` then one `--step` per DAG node (`--from` / `--to` / `--path` / `--depends` / `--verify`).
-3. Repeat until `next` is null:
-   - `next` / `status`
-   - `apply --dry-run` — read `diff` and `risk`
-   - `apply` (worktree)
-   - `verify` — exit `2` means fail: `rollback last`, then stop or fix the step
-4. C++ without `compile_commands.json`, or Rust macros: `engine: manual` or skip (exit `4`). Do not invent a semantic rename.
+1. `init` if no `.rfg/`. Feature default `--engine implement` if no `--from`. Survey: `--engine survey`. `path` may be a JSON array.
+2. `next` → `context` (exists/missing; `--sources` for snippets) → `tick`. Plan JSON is ids only. `impact` counts; `--files` to list.
+3. Replace/scaffold/run: `tick` apply+verify (`apply --dry-run` if unsure). implement/manual/survey: `tick` claims `in_progress` + contract. Untracked dirty root is ok. Edit at root, then `apply`, then `verify`.
+4. Exit 2 → `rollback last`. `next` null → `land`. Unfinished = 5.
+5. `progress` exceptions only (`data.ok`). `implemented` counts reached apply, even after verify.
 
 ## Contract
 
-Exit: `0` ok, `2` verify fail, `3` dirty, `4` unsupported, `5` conflict (diff budget).
-
-Store: `.rfg/roadmap.yaml` (plan) + `.rfg/state.json` (progress). Git is the transaction.
-
-Apply stays deterministic. Do not substitute an LLM patch for `rfg apply`.
+`0` ok · `2` verify fail · `3` dirty · `4` unsupported · `5` conflict. `ready` → `in_progress` → `implemented`/`applied` → `verified`. Store: `.rfg/roadmap.yaml` + `state.json`. Git is the transaction.

@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rfg.dev/schema/fleet.json",
+  "title": "Fleet",
+  "description": "Local list of repo paths. Not a multi-tenant control plane.",
+  "type": "object",
+  "properties": {
+    "version": { "type": "integer" },
+    "repos": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": { "type": "string" },
+          "path": { "type": "string" }
+        }
+      }
+    }
+  }
+}

@@ -12,6 +12,17 @@
     "dirty": { "type": "boolean" },
     "worktree": { "type": "string" },
     "last_checkpoint": { "type": ["string", "null"] },
+    "goal": { "$ref": "goal.json" },
+    "profile": { "type": "string" },
+    "oracles": {
+      "type": "array",
+      "items": { "$ref": "oracle.json" }
+    },
+    "next_step": { "type": ["object", "null"] },
+    "claim_step": { "type": "string" },
+    "claim_agent": { "type": "string" },
+    "applies_used": { "type": "integer" },
+    "budget": { "$ref": "budget.json" },
     "steps": {
       "type": "array",
       "items": {
@@ -22,7 +33,7 @@
           "title": { "type": "string" },
           "status": {
             "type": "string",
-            "enum": ["pending", "ready", "blocked", "applied", "verified", "failed"]
+            "enum": ["pending", "ready", "claimed", "in_progress", "blocked", "applied", "implemented", "verified", "failed"]
           },
           "depends_on": { "type": "array", "items": { "type": "string" } }
         }

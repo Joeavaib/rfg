@@ -1,0 +1,36 @@
+version: 3
+id: recipe-feature-module
+hypothesis:
+  id: h1
+  statement: Add a module at a path
+goal:
+  id: g1
+  statement: Scaffold, implement, then run a real command
+  profile: feature
+  acceptance: []
+verify: ""
+oracles:
+  - kind: test
+    command: ""
+steps:
+  - id: scaffold
+    title: Create {{path}}
+    engine: scaffold
+    paths:
+      - "{{path}}"
+    verify: test -f {{path}}
+  - id: implement
+    title: Fill in {{path}}
+    engine: implement
+    want: {{path}} exists and the verify command for this step passes
+    depends_on:
+      - scaffold
+    paths:
+      - "{{path}}"
+    verify: test -f {{path}}
+  - id: run
+    title: Run smoke
+    engine: run
+    depends_on:
+      - implement
+    verify: "{{verify}}"

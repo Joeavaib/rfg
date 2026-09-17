@@ -25,7 +25,29 @@
       }
     },
     "verify": { "type": "string" },
-    "engine": { "type": "string", "description": "replace | ast-grep | manual" },
+    "oracle": {
+      "type": "string",
+      "enum": ["test", "perf", "debug", "security"]
+    },
+    "goal": {
+      "type": "string",
+      "description": "Alias of want (legacy)"
+    },
+    "want": {
+      "type": "string",
+      "description": "What should be true after this step; does not replace the roadmap goal"
+    },
+    "paths": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Affected paths (may not exist yet). Prefer this over empty replace."
+    },
+    "extras": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Allowlisted side artefacts (e.g. rfgfeedback.md) staged without polluting path[]."
+    },
+    "engine": { "type": "string", "description": "replace | ast-grep | manual | implement | scaffold | run | survey" },
     "diff_budget": { "type": "integer", "minimum": 0 },
     "edge": { "type": "string", "description": "cgo | pyo3 | napi | cxx-ffi" }
   }

@@ -9,7 +9,13 @@
     "version": { "type": "integer", "minimum": 0 },
     "id": { "type": "string", "minLength": 1 },
     "hypothesis": { "$ref": "hypothesis.json" },
+    "goal": { "$ref": "goal.json" },
     "verify": { "type": "string" },
+    "oracles": {
+      "type": "array",
+      "items": { "$ref": "oracle.json" }
+    },
+    "budget": { "$ref": "budget.json" },
     "steps": {
       "type": "array",
       "items": { "$ref": "step.json" }

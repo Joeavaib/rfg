@@ -1,0 +1,15 @@
+version: 3
+id: recipe-cxx-ffi
+hypothesis:
+  id: h-ffi
+  statement: C++ / FFI edge stays manual
+goal:
+  id: g-ffi
+  statement: Mechanical replace does not cross cxx-ffi without engine manual
+  profile: refactor
+steps:
+  - id: ffi-edge
+    title: Manual FFI edit
+    engine: manual
+    edge: cxx-ffi
+verify: test -n ok

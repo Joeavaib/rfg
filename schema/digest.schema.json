@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rfg.dev/schema/digest.json",
+  "title": "Digest",
+  "description": "H3 nightly/handoff: goal + counts + exceptions only. Not a dashboard.",
+  "type": "object",
+  "required": ["goal", "counts", "exceptions"],
+  "properties": {
+    "goal": { "$ref": "goal.json" },
+    "counts": { "type": "object" },
+    "next": { "type": ["string", "null"] },
+    "exceptions": { "type": "array" },
+    "ok": { "type": "boolean" },
+    "generated_at": { "type": "string" },
+    "roadmap_id": { "type": "string" },
+    "path": { "type": "string" }
+  }
+}

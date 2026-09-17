@@ -19,3 +19,13 @@ jobs:
       - name: rfg status
         run: python3 rfg.py status --format json
         continue-on-error: true
+      - name: h1 handoff next
+        run: python3 rfg.py --root testdata/h1-handoff --format json next
+      - name: h1 handoff status
+        run: python3 rfg.py --root testdata/h1-handoff --format json status
+      - name: h3 progress
+        run: python3 rfg.py --root testdata/h1-handoff --format json progress
+      - name: h3 digest
+        run: python3 rfg.py --root testdata/h1-handoff --format json digest
+      - name: h7 recipes
+        run: python3 rfg.py recipe list --format json

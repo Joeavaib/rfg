@@ -1,0 +1,5 @@
+{
+  "name": "rfg",
+  "description": "Host-agnostic refactor driver for Grok Build (skill + MCP core + hooks)",
+  "version": "1.0.0"
+}

@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "rfg": {
+      "command": "python3",
+      "args": ["-m", "rfg", "mcp"],
+      "env": {
+        "PYTHONPATH": "${RFG_HOME}"
+      }
+    }
+  }
+}

@@ -63,7 +63,7 @@ class Phase4Test(unittest.TestCase):
         (rfgdir / "state.json").write_text('{"applied":[],"verified":[],"failed":[]}\n')
         out = json.loads(self.rfg("migrate", "--format", "json"))
         self.assertTrue(out["data"]["changed"])
-        self.assertEqual(out["data"]["to"], 1)
+        self.assertEqual(out["data"]["to"], 3)
         again = json.loads(self.rfg("migrate", "--format", "json"))
         self.assertFalse(again["data"]["changed"])
 
@@ -83,7 +83,7 @@ class Phase4Test(unittest.TestCase):
             "--path",
             "user.go",
             "--verify",
-            "true",
+            "test -n ok",
         )
         self.rfg("apply", "--format", "json")
         wt = Path(self.td) / ".rfg" / "worktree" / "user.go"
@@ -114,7 +114,7 @@ class Phase4Test(unittest.TestCase):
         self.rfg("index", "--format", "json")
         self.rfg("init")
         self.rfg("plan", "--hypothesis", "polyglot UserID", "--symbol", "UserID")
-        for i, (sid, path, frm) in enumerate(
+        for i, (sid, path, from_pat) in enumerate(
             [
                 ("s1", "core.go", "UserID"),
                 ("s2", "app.ts", "UserID"),
@@ -132,13 +132,13 @@ class Phase4Test(unittest.TestCase):
                 "--title",
                 sid,
                 "--from",
-                frm,
+                from_pat,
                 "--to",
-                {"s1": "UID", "s5": 'return "x"'}.get(sid, frm),
+                {"s1": "UID", "s5": 'return "x"'}.get(sid, from_pat),
                 "--path",
                 path,
                 "--verify",
-                "true" if sid != "s5" else "false",
+                "test -n ok" if sid != "s5" else "false",
             ]
             if deps:
                 args.extend(["--depends", deps[0]])
@@ -176,7 +176,7 @@ class Phase4Test(unittest.TestCase):
             for p in src.iterdir():
                 if p.is_file():
                     shutil.copy(p, td / p.name)
-            out = json.loads(self.rfg("impact", "--symbol", query, "--format", "json"))
+            out = json.loads(self.rfg("impact", "--symbol", query, "--files", "--format", "json"))
             names = sorted(f["path"] for f in out["data"]["files"])
             self.assertGreater(out["data"]["hits"], 0)
             return names
@@ -187,7 +187,7 @@ class Phase4Test(unittest.TestCase):
 
     def test_golden_python_fixture(self):
         self.copy(PYFIX)
-        out = json.loads(self.rfg("impact", "--symbol", "UserID", "--format", "json"))
+        out = json.loads(self.rfg("impact", "--symbol", "UserID", "--files", "--format", "json"))
         names = sorted(f["path"] for f in out["data"]["files"])
         expected = json.loads((ROOT / "testdata" / "golden" / "py-impact.json").read_text())
         self.assertEqual(names, expected["files"])
@@ -259,7 +259,8 @@ class Phase4Test(unittest.TestCase):
         self.assertIn("apply --dry-run", skill)
         cfg = (ROOT / ".grok" / "config.toml").read_text()
         self.assertIn("[mcp_servers.rfg]", cfg)
-        self.assertIn("rfg.py", cfg)
+        self.assertIn("-m", cfg)
+        self.assertIn("rfg", cfg)
 
 
 if __name__ == "__main__":

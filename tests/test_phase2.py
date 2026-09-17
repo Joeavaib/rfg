@@ -36,7 +36,7 @@ class Phase2Test(unittest.TestCase):
     def test_python_impact_and_index_incremental(self):
         for p in PYFIX.iterdir():
             shutil.copy(p, Path(self.td) / p.name)
-        out = json.loads(self.rfg("impact", "--symbol", "UserID", "--format", "json"))
+        out = json.loads(self.rfg("impact", "--symbol", "UserID", "--files", "--format", "json"))
         self.assertGreater(out["data"]["hits"], 0)
         self.assertTrue(out["data"]["files"])
         self.assertIn("python", out["data"]["languages"])
@@ -60,7 +60,7 @@ class Phase2Test(unittest.TestCase):
         )
         self.assertGreaterEqual(imp["data"]["occurrences"], 1)
         hit = json.loads(
-            self.rfg("impact", "--symbol", "example.com/users/UserID#", "--format", "json")
+            self.rfg("impact", "--symbol", "example.com/users/UserID#", "--files", "--format", "json")
         )
         self.assertGreater(hit["data"]["hits"], 0)
         self.assertEqual(hit["data"]["source"], "scip")
@@ -111,7 +111,7 @@ class Phase2Test(unittest.TestCase):
         self.assertEqual(init["result"]["serverInfo"]["name"], "rfg")
         listed = handle({"jsonrpc": "2.0", "id": 2, "method": "tools/list"}, self.td)
         names = {t["name"] for t in listed["result"]["tools"]}
-        for n in ("status", "next", "apply", "verify", "rollback", "impact"):
+        for n in ("next", "apply", "verify", "rollback", "tick", "context"):
             self.assertIn(n, names)
         called = handle(
             {

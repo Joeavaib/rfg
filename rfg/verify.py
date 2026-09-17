@@ -109,22 +109,81 @@ def env_hint_for_failure(code: int, output: str, command: str, step_id: str = ""
     )
 
 
+def depth2_ids(steps, step) -> list[str]:
+    """Dry-run BFS one hop beyond related_step_ids (D5, measure only).
+
+    Counts what depth 2 *would* warn about: neighbors of neighbors,
+    excluding depth-1 and self. Read-only, cycle-safe via visited set,
+    deterministic. Never touches state, never gates — the caller only
+    logs the count. Deciding warn-vs-block from the counts happens
+    after measurement (~20 verifies), not here.
+    """
+    steps = list(steps or [])
+    by_id: dict[str, object] = {}
+    for s in steps:
+        sid = getattr(s, "id", "")
+        if sid and sid not in by_id:
+            by_id[sid] = s
+    me = getattr(step, "id", "")
+    try:
+        d1 = related_step_ids(steps, step)
+    except Exception:
+        return []
+    seen = set(d1) | {me}
+    out: list[str] = []
+    for rid in d1:
+        rs = by_id.get(rid)
+        if rs is None:
+            continue
+        try:
+            nxt = related_step_ids(steps, rs)
+        except Exception:
+            continue
+        for nid in nxt:
+            if nid not in seen:
+                seen.add(nid)
+                out.append(nid)
+    return out
+
+
+def _related_cap() -> int:
+    """Cross-verify scope cap, env-tunable (default 10)."""
+    try:
+        return max(1, int(os.environ.get("RFG_RELATED_MAX") or 10))
+    except ValueError:
+        return 10
+
+
 def related_step_ids(steps, step) -> list[str]:
     """Stufe 1 cross-verify scope: direct dependents + path overlap.
 
-    - dependents: steps with step.id in their depends_on
-    - overlap: steps sharing any entry of step_paths()
-    Self is excluded. Order: dependents first, then overlap, deduped.
+    Ranked, not lottery (D1): dependents first (causal edge), then
+    rarity (idf-damped overlap so God-Files like rfg/cli.py shared by
+    58 steps don't dominate), then step id (deterministic). Downstream
+    weighting is parked (no measured need yet). Capped at
+    RFG_RELATED_MAX (default 10). Self is excluded.
     """
     try:
         from rfg.types import step_paths as _paths
     except Exception:
         return []
+    import math
+
     me = getattr(step, "id", "")
     mine = set(_paths(step) or [])
+    steps = list(steps or [])
+    n = max(1, len(steps))
+    df: dict[str, int] = {}
+    for s in steps:
+        try:
+            ps = set(_paths(s) or [])
+        except Exception:
+            ps = set()
+        for p in ps:
+            df[p] = df.get(p, 0) + 1
     dependents: list[str] = []
-    overlap: list[str] = []
-    for s in steps or []:
+    scored: list[tuple[float, str]] = []
+    for s in steps:
         sid = getattr(s, "id", "")
         if not sid or sid == me:
             continue
@@ -132,18 +191,22 @@ def related_step_ids(steps, step) -> list[str]:
             dependents.append(sid)
             continue
         try:
-            theirs = set(_paths(s) or [])
+            shared = mine & set(_paths(s) or [])
         except Exception:
-            theirs = set()
-        if mine and theirs and (mine & theirs):
-            overlap.append(sid)
+            shared = set()
+        if mine and shared:
+            rarity = sum(math.log(n / max(1, df.get(p, 1))) for p in shared)
+            scored.append((-rarity, sid))
+    dependents.sort()
+    scored.sort()
+    out = list(dependents) + [sid for _, sid in scored]
     seen: set[str] = set()
-    out: list[str] = []
-    for sid in dependents + overlap:
+    deduped: list[str] = []
+    for sid in out:
         if sid not in seen:
             seen.add(sid)
-            out.append(sid)
-    return out[:10]
+            deduped.append(sid)
+    return deduped[: _related_cap()]
 
 
 def is_trivial(command: str | None) -> bool:
@@ -209,10 +272,25 @@ def clip_output(text: str, limit: int = OUTPUT_LIMIT) -> str:
     return "…[truncated, see log]…\n" + s[-keep:]
 
 
-def write_log(root: str | Path, step_id: str, command: str, code: int, output: str) -> str:
+def write_log(
+    root: str | Path,
+    step_id: str,
+    command: str,
+    code: int,
+    output: str,
+    elapsed_ms: float | None = None,
+) -> str:
+    """Write `.rfg/verify/<step>.log`. `elapsed_ms` (D4, optional) goes
+    into the `$`-header for cost measurement; never gates anything."""
     p = Path(root) / ".rfg" / "verify" / f"{step_id}.log"
     p.parent.mkdir(parents=True, exist_ok=True)
-    body = f"$ {command}\nexit {code}\n\n{output or ''}"
+    head = f"$ {command}"
+    if elapsed_ms is not None:
+        try:
+            head += f" elapsed_ms={float(elapsed_ms):.1f}"
+        except (TypeError, ValueError):
+            pass
+    body = f"{head}\nexit {code}\n\n{output or ''}"
     if not body.endswith("\n"):
         body += "\n"
     p.write_text(body, encoding="utf-8")

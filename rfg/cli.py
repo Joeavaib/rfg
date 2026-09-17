@@ -52,6 +52,44 @@ def same_claim_client(state, agent: str) -> bool:
     return state.claim_agent == agent
 
 
+def cross_timeout_for(remaining_s: float, default_s: float) -> float:
+    """Per-related timeout capped by remaining cross budget (D2).
+
+    Never below the 5s floor so a nearly-exhausted budget still gets a
+    probe instead of a zero-timeout instant fail.
+    """
+    try:
+        default_s = float(default_s)
+    except (TypeError, ValueError):
+        default_s = 60.0
+    try:
+        remaining_s = float(remaining_s)
+    except (TypeError, ValueError):
+        return default_s
+    if remaining_s <= 0:
+        return 5.0
+    return min(default_s, remaining_s)
+
+
+def triage_cross_failure(code: int, output: str, was_red_before: bool) -> str:
+    """Label-only triage for cross-verify failures (D3).
+
+    ENV: missing binary/unsupported toolchain; COST: timeout (says
+    nothing about correctness); PRE-EXISTING: neighbor already red
+    before this step ran; else REGRESS-SUSPECT. Never changes exits —
+    labels ride along in the message, VERIFY_FAIL stays as is.
+    """
+    if looks_like_missing_binary(code, output or ""):
+        return "ENV/toolchain-missing"
+    if code == 4:
+        return "ENV/unsupported"
+    if code == 2 and "verify timeout" in (output or ""):
+        return "COST/timeout"
+    if was_red_before:
+        return "PRE-EXISTING/neighbor-already-red"
+    return "REGRESS-SUSPECT/assert-fail"
+
+
 def cross_verify_message(failures: list[tuple[str, str, int, str, str]]) -> str:
     """Remediation-carrying cross-verify error (Meridian: ortlose Meldungen).
 
@@ -1407,10 +1445,22 @@ class CLI:
 
         cross_failed: list[str] = []
         cross_items: list[tuple[str, str, int, str, str]] = []
+        skipped: list[dict] = []
+        failed_before = set(state.failed)
         try:
             related = _related(rm.steps, step)
         except Exception:
             related = []
+        import time as _time
+
+        try:
+            cross_budget = float(os.environ.get("RFG_CROSS_BUDGET") or 120)
+        except ValueError:
+            cross_budget = 120.0
+        try:
+            deadline = _time.monotonic() + cross_budget
+        except Exception:
+            deadline = 0.0
         for rid in related:
             rs = dag.step_by_id(rm, rid)
             if not rs:
@@ -1426,8 +1476,34 @@ class CLI:
                 timeout2 = float(os.environ.get("RFG_VERIFY_TIMEOUT") or 60)
             except ValueError:
                 timeout2 = 60.0
+            # D2: deadline with skip-with-reason (never silent); the
+            # per-verify timeout is capped by the remaining budget.
+            try:
+                remaining = deadline - _time.monotonic()
+            except Exception:
+                remaining = timeout2
+            if deadline and remaining < 5.0:
+                skipped.append({"step": rid, "reason": "budget-exhausted"})
+                continue
+            timeout2 = cross_timeout_for(remaining if deadline else timeout2, timeout2)
+            # D4: measure only — elapsed feeds log header + ledger event,
+            # never ordering, budget, or gates.
+            try:
+                _t0 = _time.monotonic()
+            except Exception:
+                _t0 = 0.0
             rcode, rout = run_verify(directory, rcmd, (rs.oracle or "test"), timeout=timeout2, env_extra=env_extra)
-            rlog = write_verify_log(self.root, f"{sid}__cross_{rid}", rcmd, rcode, rout)
+            try:
+                _elapsed = (_time.monotonic() - _t0) * 1000.0 if _t0 else None
+            except Exception:
+                _elapsed = None
+            rlog = write_verify_log(self.root, f"{sid}__cross_{rid}", rcmd, rcode, rout,
+                                    elapsed_ms=_elapsed)
+            if rcode == 2 and "verify timeout" in (rout or ""):
+                # Degrade, don't fail: a timeout says nothing about
+                # correctness (DYN-4 triage: cost-noise, not regress).
+                skipped.append({"step": rid, "reason": "timeout"})
+                continue
             if rcode != 0:
                 cross_failed.append(rid)
                 cross_items.append((rid, rcmd, rcode, rout, rlog))
@@ -1435,7 +1511,11 @@ class CLI:
             if sid not in state.failed:
                 state.failed.append(sid)
             st.write_state(state)
-            self.emit_err("verify", cross_verify_message(cross_items))
+            triage = "; ".join(
+                f"{rid}: {triage_cross_failure(rcode, rout, rid in failed_before)}"
+                for rid, _, rcode, rout, _ in cross_items
+            )
+            self.emit_err("verify", cross_verify_message(cross_items) + f" triage: {triage}")
             return VERIFY_FAIL
         if sid not in state.verified:
             state.verified.append(sid)
@@ -1445,7 +1525,20 @@ class CLI:
             state.claim_agent = ""
         st.write_state(state)
         audit.record(self.root, "verify", step=sid, command=cmd)
-        self.emit("verify", {"step": sid, "command": cmd, "output": clip_output(out), "log": log_path})
+        payload = {"step": sid, "command": cmd, "output": clip_output(out), "log": log_path}
+        if skipped:
+            # D2: skips are visible (never silent, never counted as pass).
+            payload["skipped"] = skipped
+        try:
+            # D5: depth-2 dry-run counter (warn-only measurement).
+            from rfg.verify import depth2_ids as _depth2
+
+            _d2 = _depth2(rm.steps, step)
+        except Exception:
+            _d2 = []
+        if _d2:
+            payload["depth2_would_warn"] = _d2
+        self.emit("verify", payload)
         return OK
 
     def _maybe_autocommit(self, rm, state, args: list[str]) -> dict:

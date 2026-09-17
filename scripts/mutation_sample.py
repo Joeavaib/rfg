@@ -15,7 +15,7 @@ MUTANTS: list[dict] = [
     {
         "name": "cross-scope-empty",
         "file": "rfg/verify.py",
-        "old": "    return out[:10]",
+        "old": "    return deduped[: _related_cap()]",
         "new": "    return []",
         "kill": "python3 -m pytest tests/test_stress_feedback.py::StressFeedbackTest::test_cross_verify -q",
         "why": "empty cross scope must miss the overlap regression",

@@ -42,19 +42,31 @@ def record_test_added(root: str | Path, function: str, test_id: str, step: str, 
     )
 
 
-def record_verify_event(root: str | Path, test_id: str, step: str, code: int, log: str, **ignored) -> None:
+def record_verify_event(
+    root: str | Path,
+    test_id: str,
+    step: str,
+    code: int,
+    log: str,
+    elapsed_ms: float | None = None,
+    **ignored,
+) -> None:
     """A verify ran for `test_id`. Extra kwargs (e.g. passes=999 from an
-    agent) are dropped on purpose: counters are derived, never written."""
-    _append(
-        root,
-        {
-            "kind": "verify",
-            "test": str(test_id or ""),
-            "step": str(step or ""),
-            "exit": int(code),
-            "log": str(log or ""),
-        },
-    )
+    agent) are dropped on purpose: counters are derived, never written.
+    `elapsed_ms` (D4) is informational only, never used for decisions."""
+    row: dict = {
+        "kind": "verify",
+        "test": str(test_id or ""),
+        "step": str(step or ""),
+        "exit": int(code),
+        "log": str(log or ""),
+    }
+    if elapsed_ms is not None:
+        try:
+            row["elapsed_ms"] = float(elapsed_ms)
+        except (TypeError, ValueError):
+            pass
+    _append(root, row)
 
 
 def read_events(root: str | Path) -> list[dict]:

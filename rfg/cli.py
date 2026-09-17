@@ -1461,6 +1461,11 @@ class CLI:
             deadline = _time.monotonic() + cross_budget
         except Exception:
             deadline = 0.0
+        # F1: dedup memo (opt-in RFG_DEDUP_MEMO=1). Identical related
+        # commands run once; reuse is listed, never silent. Default off.
+        memo_on = os.environ.get("RFG_DEDUP_MEMO") == "1"
+        memo: dict[tuple[str, str], tuple[int, str, str, str]] = {}
+        deduped: list[dict] = []
         for rid in related:
             rs = dag.step_by_id(rm, rid)
             if not rs:
@@ -1471,6 +1476,14 @@ class CLI:
                 continue
             rcmd = step_observation(rs, "")
             if not rcmd or is_trivial(rcmd):
+                continue
+            rkind = (rs.oracle or "test")
+            if memo_on and (rkind, rcmd) in memo:
+                _m_code, _m_out, _m_log, _m_via = memo[(rkind, rcmd)]
+                deduped.append({"step": rid, "via": _m_via, "reason": "identical-command"})
+                if _m_code != 0:
+                    cross_failed.append(rid)
+                    cross_items.append((rid, rcmd, _m_code, _m_out, _m_log))
                 continue
             try:
                 timeout2 = float(os.environ.get("RFG_VERIFY_TIMEOUT") or 60)
@@ -1499,6 +1512,8 @@ class CLI:
                 _elapsed = None
             rlog = write_verify_log(self.root, f"{sid}__cross_{rid}", rcmd, rcode, rout,
                                     elapsed_ms=_elapsed)
+            if memo_on and not (rcode == 2 and "verify timeout" in (rout or "")):
+                memo[(rkind, rcmd)] = (rcode, rout, rlog, rid)
             if rcode == 2 and "verify timeout" in (rout or ""):
                 # Degrade, don't fail: a timeout says nothing about
                 # correctness (DYN-4 triage: cost-noise, not regress).
@@ -1529,6 +1544,9 @@ class CLI:
         if skipped:
             # D2: skips are visible (never silent, never counted as pass).
             payload["skipped"] = skipped
+        if deduped:
+            # F1: memo reuse is listed with source (never silent).
+            payload["deduped"] = deduped
         try:
             # D5: depth-2 dry-run counter (warn-only measurement).
             from rfg.verify import depth2_ids as _depth2

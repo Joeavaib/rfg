@@ -239,5 +239,63 @@ class YamlTest(unittest.TestCase):
         self.assertEqual(got.steps[0].replace.from_pat, "UserID")
 
 
+class BackupRestoreTest(unittest.TestCase):
+    def setUp(self):
+        self.td = tempfile.mkdtemp(prefix="rfg-bak-")
+        self.addCleanup(shutil.rmtree, self.td, ignore_errors=True)
+        self.env = os.environ.copy()
+        self.env.update(
+            {
+                "PYTHONPATH": str(ROOT),
+                "GIT_AUTHOR_NAME": "t",
+                "GIT_AUTHOR_EMAIL": "t@t.test",
+                "GIT_COMMITTER_NAME": "t",
+                "GIT_COMMITTER_EMAIL": "t@t.test",
+            }
+        )
+        subprocess.check_call(["git", "init"], cwd=self.td, env=self.env, stdout=subprocess.DEVNULL)
+        subprocess.check_call(["git", "config", "user.email", "t@t.test"], cwd=self.td, env=self.env)
+        subprocess.check_call(["git", "config", "user.name", "t"], cwd=self.td, env=self.env)
+
+    def rfg(self, *args, code=0, env=None):
+        r = subprocess.run(
+            RFG + ["--root", self.td, *args],
+            cwd=self.td,
+            env=env or self.env,
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(r.returncode, code, r.stdout + r.stderr)
+        return r.stdout
+
+    def test_backup_lists_and_restore_recovers(self):
+        Path(self.td, "mod.py").write_text("old\n")
+        subprocess.check_call(["git", "add", "-A"], cwd=self.td, env=self.env, stdout=subprocess.DEVNULL)
+        subprocess.check_call(["git", "commit", "-m", "i"], cwd=self.td, env=self.env, stdout=subprocess.DEVNULL)
+        self.rfg("init")
+        self.rfg(
+            "plan", "--step", "B1", "--engine", "implement", "--path", "mod.py",
+            "--want", "w", "--verify", "test -n ok",
+        )
+        self.rfg("tick", "B1")
+        bak = json.loads(self.rfg("backup", "--format", "json"))["data"]
+        self.assertTrue(bak["backups"], bak)
+        bid = bak["backups"][-1]
+        for name in ("roadmap.yaml", "state.json"):
+            self.assertTrue((Path(self.td) / ".rfg" / "land-backups" / bid / name).is_file(), name)
+        self.rfg("restore", "no-such-backup", code=4)
+        (Path(self.td) / ".rfg" / "roadmap.yaml").unlink()
+        (Path(self.td) / ".rfg" / "state.json").unlink()
+        restored = json.loads(self.rfg("restore", bid, "--format", "json"))["data"]
+        self.assertIn("roadmap.yaml", restored.get("files") or [], restored)
+        for name in ("roadmap.yaml", "state.json"):
+            src = Path(self.td) / ".rfg" / "land-backups" / bid / name
+            self.assertEqual((Path(self.td) / ".rfg" / name).read_bytes(), src.read_bytes(), name)
+
+    def test_restore_without_id_is_usage(self):
+        self.rfg("init")
+        self.rfg("restore", code=1)
+
+
 if __name__ == "__main__":
     unittest.main()

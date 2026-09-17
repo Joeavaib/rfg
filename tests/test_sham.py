@@ -93,5 +93,66 @@ class ShamCheckTest(unittest.TestCase):
         self.assertIn(("sham-verify", "s1"), kinds)
 
 
+class DoctorRecoveryTest(unittest.TestCase):
+    def setUp(self):
+        self.td = tempfile.mkdtemp(prefix="rfg-rec-")
+        self.addCleanup(shutil.rmtree, self.td, ignore_errors=True)
+        self.env = os.environ.copy()
+        self.env.update(
+            {
+                "PYTHONPATH": str(ROOT),
+                "GIT_AUTHOR_NAME": "t",
+                "GIT_AUTHOR_EMAIL": "t@t.test",
+                "GIT_COMMITTER_NAME": "t",
+                "GIT_COMMITTER_EMAIL": "t@t.test",
+            }
+        )
+
+    def rfg(self, *args, code=0):
+        r = subprocess.run(
+            RFG + ["--root", self.td, *args],
+            cwd=self.td, env=self.env, capture_output=True, text=True,
+        )
+        self.assertEqual(r.returncode, code, r.stdout + r.stderr)
+        return r.stdout
+
+    def _detail(self):
+        from rfg import doctor
+
+        got = doctor.run(Path(self.td))["checks"]["recovery"]
+        self.assertTrue(got["ok"], got)
+        return got["detail"]
+
+    def test_missing_store_with_backups_warns_restore(self):
+        bak = Path(self.td, ".rfg", "land-backups", "20240101T000000-abcdef01")
+        bak.mkdir(parents=True)
+        (bak / "roadmap.yaml").write_text("x\n")
+        (bak / "state.json").write_text("{}\n")
+        detail = self._detail()
+        self.assertTrue(any("restore" in n for n in detail), detail)
+
+    def test_healthy_store_reports_ok(self):
+        subprocess.check_call(["git", "init", "-q"], cwd=self.td, env=self.env)
+        Path(self.td, "app.py").write_text("x = 1\n")
+        subprocess.check_call(["git", "add", "-A"], cwd=self.td, env=self.env, stdout=subprocess.DEVNULL)
+        subprocess.check_call(["git", "commit", "-qm", "i"], cwd=self.td, env=self.env)
+        self.rfg("init")
+        self.assertEqual(self._detail(), "ok")
+
+    def test_dirty_worktree_warns(self):
+        from rfg import gitops
+
+        subprocess.check_call(["git", "init", "-q"], cwd=self.td, env=self.env)
+        Path(self.td, "app.py").write_text("x = 1\n")
+        subprocess.check_call(["git", "add", "-A"], cwd=self.td, env=self.env, stdout=subprocess.DEVNULL)
+        subprocess.check_call(["git", "commit", "-qm", "i"], cwd=self.td, env=self.env)
+        self.rfg("init")
+        wt = Path(gitops.ensure_worktree(self.td))
+        (wt / "app.py").write_text("x = 2\n")
+        subprocess.check_call(["git", "add", "-A"], cwd=wt, env=self.env, stdout=subprocess.DEVNULL)
+        detail = self._detail()
+        self.assertTrue(any("worktree" in n for n in detail), detail)
+
+
 if __name__ == "__main__":
     unittest.main()

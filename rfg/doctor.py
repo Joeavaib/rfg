@@ -358,6 +358,26 @@ def run(root: str | Path) -> dict:
     except Exception:
         pass
     checks["worktree"] = {"ok": True, "detail": wt_note}
+    rec_notes: list[str] = []
+    try:
+        rfgd = root / ".rfg"
+        rm_p, st_p = rfgd / "roadmap.yaml", rfgd / "state.json"
+        bakd = rfgd / gitops.LAND_BACKUP_DIR
+        bak_count = len([p for p in bakd.iterdir() if p.is_dir()]) if bakd.is_dir() else 0
+        if (not rm_p.is_file() or not st_p.is_file()) and bak_count:
+            rec_notes.append(
+                f"store incomplete but {bak_count} backup(s) present; "
+                "see rfg backup / rfg restore <id>"
+            )
+        # NOTE: roadmap-newer-than-state mtime skew is normal mid-campaign
+        # (plan rewrites the roadmap before the next apply), so it is
+        # deliberately not warned about.
+        wt = gitops.worktree_path(root)
+        if wt.is_dir() and gitops.is_repo(str(wt)) and gitops.dirty_tracked(str(wt)):
+            rec_notes.append(".rfg/worktree has uncommitted changes (land copies worktree onto root)")
+    except Exception:
+        pass
+    checks["recovery"] = {"ok": True, "detail": rec_notes or "ok"}
     # compile db missing is not a doctor failure; it's informational
     failed = [k for k, v in checks.items() if not v["ok"] and k in {"python", "git", "repo"}]
     return {

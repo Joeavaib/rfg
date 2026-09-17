@@ -219,10 +219,16 @@ Honest version: solid core, prototype product. The loop (plan → claim → appl
   worktree/       the Git worktree where steps are applied
   digest.json     handoff snapshot (full file; emitted output is budgeted)
   audit.jsonl     append-only event log
+  land-backups/   roadmap.yaml+state.json copies (written on land and after
+                  every successful tick/apply/verify; pruned to newest 10)
   scan.sarif      security findings (when scan ran)
   sbom.json       CycloneDX-lite inventory (always complete on disk)
   baseline.json / last_perf.json / repro.log   perf/debug oracle data
 ```
+
+Recovery (`.rfg/` is gitignored): `rfg backup` lists backups,
+`rfg restore <id>` copies both files back (exit 4 on unknown id).
+`doctor` warns when the store is incomplete but backups exist.
 
 ---
 

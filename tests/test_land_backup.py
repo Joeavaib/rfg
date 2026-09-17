@@ -103,9 +103,29 @@ class LandBackupTest(unittest.TestCase):
         self.assertTrue(applied["ok"], applied)
         ver = json.loads(self.rfg("verify", "--format", "json", code=2))
         self.assertFalse(ver["ok"], ver)
+        # loop commands may have backed up (CR1), but the failed land itself
+        # must not add a backup nor report one.
+        baks = Path(self.td) / ".rfg" / "land-backups"
+        before = sorted(p.name for p in baks.iterdir() if p.is_dir()) if baks.is_dir() else []
         land = json.loads(self.rfg("land", "--format", "json", code=5))
         self.assertFalse(land["ok"], land)
-        self.assertFalse((Path(self.td) / ".rfg" / "land-backups").exists(), land)
+        self.assertNotIn("state_backup", land.get("data") or {}, land)
+        after = sorted(p.name for p in baks.iterdir() if p.is_dir()) if baks.is_dir() else []
+        self.assertEqual(before, after, land)
+
+    def test_loop_writes_state_backup(self):
+        # CR1: successful apply/verify back up without land (crash recovery).
+        # ids are content-addressed (<ts>-<sha8>), so "latest" is not
+        # name-ordered: any dir matching the live store proves the backup.
+        self._loop("python3 -c \"assert 'new' in open('mod.py').read()\"")
+        baks = Path(self.td) / ".rfg" / "land-backups"
+        dirs = sorted(p for p in baks.iterdir() if p.is_dir())
+        self.assertTrue(dirs, "apply/verify must leave a state backup")
+        live = {n: (Path(self.td) / ".rfg" / n).read_bytes() for n in ("roadmap.yaml", "state.json")}
+        self.assertTrue(
+            any(all((d / n).is_file() and (d / n).read_bytes() == live[n] for n in live) for d in dirs),
+            [d.name for d in dirs],
+        )
 
 
     def test_old_backups_pruned(self):

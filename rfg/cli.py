@@ -171,6 +171,8 @@ Commands:
   land [--commit|--no-commit]  copy the apply worktree onto the root and re-verify
                         (--commit or RFG_AUTO_COMMIT=1 snapshots a local commit; never pushes)
   rollback last        restore the last checkpoint
+  backup               list roadmap/state backups in .rfg/land-backups/
+  restore <id>         restore roadmap.yaml+state.json from a backup (exit 4 on unknown id)
   why                  explain why a step is ready/blocked
   impact [--symbol S]  file/import/export hit counts (index or SCIP)
   index                rebuild incremental file-hash index
@@ -557,6 +559,7 @@ class CLI:
                     "context": context.tick_view(self.root, rm, state, step),
                 },
             )
+            self._backup_best_effort()
             return OK
         # scaffold and run apply+verify like replace
         self._capture = []
@@ -1174,6 +1177,7 @@ class CLI:
                 self.emit("apply", payload, diff=diff)
             else:
                 self.emit("apply", payload)
+            self._backup_best_effort()
             return OK
         if step.engine in ("manual", "implement", "run", "survey"):
             n = 0
@@ -1315,6 +1319,7 @@ class CLI:
             self.emit("apply", payload, diff=diff)
         else:
             self.emit("apply", payload)
+        self._backup_best_effort()
         return OK
 
     def cmd_verify(self, args: list[str]) -> int:
@@ -1562,6 +1567,7 @@ class CLI:
         if _d2:
             payload["depth2_would_warn"] = _d2
         self.emit("verify", payload)
+        self._backup_best_effort()
         return OK
 
     def _maybe_autocommit(self, rm, state, args: list[str]) -> dict:
@@ -1601,6 +1607,19 @@ class CLI:
             return {"state_backup": gitops.backup_roadmap_state(self.root)}
         except OSError as e:
             return {"warning": f"state backup failed: {e}"}
+
+    def _backup_best_effort(self) -> None:
+        """Best-effort roadmap/state backup after mutating loop commands (CR1).
+
+        Side-effect only, never raises, never changes emitted payloads:
+        `.rfg/` is gitignored, so frequent copies are the only
+        harness-side recovery path after a crash. Ids are
+        content-addressed (`<ts>-<sha8>`), prune caps at LAND_BACKUP_KEEP.
+        """
+        try:
+            gitops.backup_roadmap_state(self.root)
+        except OSError:
+            pass
 
     def cmd_land(self, args: list[str]) -> int:
         try:
@@ -1788,6 +1807,35 @@ class CLI:
             payload["untracked_backup_dir"] = backup_dir
             payload["warning"] = f"untracked worktree files backed up to {backup_dir} before reset --hard"
         self.emit("rollback", payload)
+        return OK
+
+    def cmd_backup(self, args: list[str]) -> int:
+        """List roadmap/state backups (newest sorts last). Never fails."""
+        rfg = Path(self.root) / ".rfg" / gitops.LAND_BACKUP_DIR
+        try:
+            backups = sorted(p.name for p in rfg.iterdir() if p.is_dir()) if rfg.is_dir() else []
+        except OSError:
+            backups = []
+        self.emit("backup", {"backups": backups})
+        return OK
+
+    def cmd_restore(self, args: list[str]) -> int:
+        """Restore roadmap.yaml+state.json from a backup id.
+
+        Exit 4 on unknown/unreadable backups (won't guess): pick an id
+        from `rfg backup` first.
+        """
+        bid = args[0] if args and not args[0].startswith("-") else ""
+        if not bid:
+            self.emit_err("restore", "usage: rfg restore <id> (see rfg backup)")
+            return USAGE
+        try:
+            restored = gitops.restore_roadmap_state(self.root, bid)
+        except OSError as e:
+            self.emit_err("restore", str(e))
+            return UNSUPPORTED
+        audit.record(self.root, "restore", step=bid)
+        self.emit("restore", restored)
         return OK
 
     def cmd_claim(self, args: list[str]) -> int:
@@ -2481,6 +2529,8 @@ def main(argv: list[str] | None = None) -> int:
         "verify": lambda: c.cmd_verify(rest),
         "land": lambda: c.cmd_land(rest),
         "rollback": lambda: c.cmd_rollback(rest),
+        "backup": lambda: c.cmd_backup(rest),
+        "restore": lambda: c.cmd_restore(rest),
         "claim": lambda: c.cmd_claim(rest),
         "release": lambda: c.cmd_release(rest),
         "audit": lambda: c.cmd_audit(rest),

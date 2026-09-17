@@ -79,6 +79,8 @@ SCHEMAS = {
         },
     },
     "release": {"type": "object", "properties": {"root": _ROOT}},
+    "backup": {"type": "object", "properties": {"root": _ROOT}},
+    "restore": {"type": "object", "properties": {"root": _ROOT, "id": _STR}},
     "verify": {"type": "object", "properties": {"root": _ROOT, "step": _STR}},
     "land": {"type": "object", "properties": {"root": _ROOT, "commit": _BOOL}},
     "rollback": {"type": "object", "properties": {"root": _ROOT}},
@@ -129,6 +131,8 @@ TOOLS = [
     {"name": "verify", "description": "Run verify"},
     {"name": "land", "description": "Copy worktree onto root and re-verify"},
     {"name": "rollback", "description": "Restore last checkpoint"},
+    {"name": "backup", "description": "List roadmap/state backups (recovery; needs RFG_MCP_ALL=1)"},
+    {"name": "restore", "description": "Restore roadmap/state from a backup id (recovery; needs RFG_MCP_ALL=1)"},
     {"name": "claim", "description": "Lock a step"},
     {"name": "release", "description": "Drop the current step claim"},
     {"name": "audit", "description": "Recent audit.jsonl events"},
@@ -238,6 +242,11 @@ def call_tool(name: str, arguments: dict[str, Any], root: str) -> tuple[int, dic
         return c.cmd_land([]), {}
     if name == "rollback":
         return c.cmd_rollback(["last"]), {}
+    if name == "backup":
+        return c.cmd_backup([]), {}
+    if name == "restore":
+        bid = str(arguments.get("id") or "")
+        return c.cmd_restore([bid] if bid else []), {}
     if name == "claim":
         if arguments.get("agent"):
             args.extend(["--agent", str(arguments["agent"])])

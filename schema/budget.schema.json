@@ -5,6 +5,8 @@
   "type": "object",
   "additionalProperties": false,
   "properties": {
-    "max_applies": { "type": "integer", "minimum": 0 }
+    "max_applies": { "type": "integer", "minimum": 0 },
+    "max_seconds": { "type": "number", "minimum": 0 },
+    "max_related": { "type": "integer", "minimum": 0 }
   }
 }

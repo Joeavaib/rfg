@@ -189,8 +189,15 @@ def _downstream_count(rm: Roadmap, sid: str) -> int:
     return count
 
 
-def recommend(rm: Roadmap, st: State) -> tuple[str, str]:
+def recommend(rm: Roadmap, st: State, epic: str = "") -> tuple[str, str]:
     ids = ready_ids(rm, st)
+    if epic:
+        from rfg.scope import epic_of as _epic_of
+
+        scoped = [sid for sid in ids if _epic_of(sid) == epic]
+        if not scoped:
+            return "", f"unknown epic {epic!r} (warn-first, no gate)"
+        ids = scoped
     if not ids:
         return "", ""
     if st.claim_step and st.claim_step in ids:

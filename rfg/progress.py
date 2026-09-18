@@ -24,6 +24,31 @@ def apply_dirty(root: str, rm: Roadmap, state: State) -> bool:
     return gitops.is_repo(root) and gitops.dirty_tracked(root)
 
 
+def _by_epic_counts(rm: Roadmap, steps: list[dict]) -> dict:
+    """Gruppierte Counts je Epic-Praefix (GS3, warn-first, kein Gate).
+
+    Reine String-Praefixe via :mod:`rfg.scope` (kein Schema-Feld):
+    ``{epic: {"total", "verified", "ready"}}``. Additiv — aendert keine
+    Exit-Semantik.
+    """
+    from rfg.scope import epic_of as _epic_of
+
+    status_by_id = {s.get("id"): s.get("status") for s in steps or []}
+    out: dict[str, dict[str, int]] = {}
+    for s in rm.steps or []:
+        e = _epic_of(s.id)
+        if not e:
+            continue
+        g = out.setdefault(e, {"total": 0, "verified": 0, "ready": 0})
+        g["total"] += 1
+        st = status_by_id.get(s.id, "")
+        if st == "verified":
+            g["verified"] += 1
+        if st in ("ready", "claimed", "in_progress"):
+            g["ready"] += 1
+    return out
+
+
 def report(root: str, rm: Roadmap, state: State) -> dict:
     snap = dag.compute(rm, state)
     snap["dirty"] = apply_dirty(root, rm, state)
@@ -66,6 +91,7 @@ def report(root: str, rm: Roadmap, state: State) -> dict:
     acc_code, acc_out, _acc = accept.run_all(root, rm)
     if acc_code != 0:
         exceptions.append({"kind": "acceptance", "step": "", "detail": (acc_out or "acceptance failed").strip()[:300]})
+    by_epic = _by_epic_counts(rm, steps)
     from rfg import oracles as _oracles
 
     try:
@@ -96,6 +122,7 @@ def report(root: str, rm: Roadmap, state: State) -> dict:
         },
         "next": snap["next"],
         "ready": [s["id"] for s in steps if s["status"] in ("ready", "claimed", "in_progress")][:8],
+        "by_epic": by_epic,
         "exceptions": exceptions,
         "perf": perf,
         "ok": not failed and not snap.get("dirty") and acc_code == 0,

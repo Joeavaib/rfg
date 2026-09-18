@@ -146,6 +146,35 @@ def depth2_ids(steps, step) -> list[str]:
     return out
 
 
+def depth2_warn_threshold() -> int:
+    """Depth-2 warn threshold, env-tunable (default 10, junk -> 10).
+
+    Warn-only measurement (XB): exceeding the threshold never gates,
+    it only surfaces via payload["depth2_warn"]. Mirrors _related_cap.
+    """
+    try:
+        return max(1, int(os.environ.get("RFG_DEPTH2_WARN") or 10))
+    except ValueError:
+        return 10
+
+
+def depth2_warn(count, threshold=None) -> bool:
+    """True when a depth-2 count reaches warn level (never gates).
+
+    Pure warn-only predicate: returns a bool, raises nothing, changes
+    no exit. threshold defaults to depth2_warn_threshold().
+    """
+    try:
+        n = int(count)
+    except (TypeError, ValueError):
+        return False
+    try:
+        thr = int(threshold) if threshold is not None else depth2_warn_threshold()
+    except (TypeError, ValueError):
+        thr = 10
+    return n > max(1, thr)
+
+
 def _related_cap() -> int:
     """Cross-verify scope cap, env-tunable (default 10)."""
     try:
@@ -154,14 +183,11 @@ def _related_cap() -> int:
         return 10
 
 
-def related_step_ids(steps, step) -> list[str]:
-    """Stufe 1 cross-verify scope: direct dependents + path overlap.
+def uncapped_related_step_ids(steps, step) -> list[str]:
+    """Full ranked related list before the RFG_RELATED_MAX cap (XB).
 
-    Ranked, not lottery (D1): dependents first (causal edge), then
-    rarity (idf-damped overlap so God-Files like rfg/cli.py shared by
-    58 steps don't dominate), then step id (deterministic). Downstream
-    weighting is parked (no measured need yet). Capped at
-    RFG_RELATED_MAX (default 10). Self is excluded.
+    Same ranking as related_step_ids (dependents, idf-rarity, id);
+    warn-only visibility helper, no gate, no cap applied here.
     """
     try:
         from rfg.types import step_paths as _paths
@@ -206,6 +232,27 @@ def related_step_ids(steps, step) -> list[str]:
         if sid not in seen:
             seen.add(sid)
             deduped.append(sid)
+    return deduped
+
+
+def related_total_count(steps, step) -> int:
+    """Uncapped related count (warn-only, never gates)."""
+    try:
+        return len(uncapped_related_step_ids(steps, step))
+    except Exception:
+        return 0
+
+
+def related_step_ids(steps, step) -> list[str]:
+    """Stufe 1 cross-verify scope: direct dependents + path overlap.
+
+    Ranked, not lottery (D1): dependents first (causal edge), then
+    rarity (idf-damped overlap so God-Files like rfg/cli.py shared by
+    58 steps don't dominate), then step id (deterministic). Downstream
+    weighting is parked (no measured need yet). Capped at
+    RFG_RELATED_MAX (default 10). Self is excluded.
+    """
+    deduped = uncapped_related_step_ids(steps, step)
     return deduped[: _related_cap()]
 
 

@@ -18,6 +18,77 @@ from rfg.verify import is_weak_verify, is_sham_verify
 
 KNOWN_ENGINES = ("replace", "", "ast-grep", "manual", "implement", "scaffold", "run", "survey")
 
+# KD: warn-first scope breadth rule (no gate, no hard limit, exit 0).
+# Broad path[] = ab 5 Dateien oder ein Dir-Eintrag, der auf mehr als
+# MAX_FILES expandiert. Display kappt, Disk-Dateien bleiben voll,
+# --max-chars 0 = unlimited (K11-Regel), exceptions schrumpfen nie.
+BREADTH_THRESHOLD = 5
+SCOPE_HINT = "Scope verkleinern statt Guard biegen"
+
+
+def breadth_warnings(
+    steps: list[Step], root: str | Path | None = None, extra: Step | None = None
+) -> list[str]:
+    """Warn bei breitem path[] (KD-1), rein warnend, kein Gate.
+
+    - ab BREADTH_THRESHOLD (5) path[]-Eintraegen, oder
+    - ein Dir-Eintrag expandiert (via expand_dir_paths) auf mehr als
+      MAX_FILES Dateien.
+    Gibt Warntexte zurueck, raised nie, exit 0 (kein Gate).
+    """
+    try:
+        from rfg.context import MAX_FILES as _MAX_FILES
+    except Exception:
+        _MAX_FILES = 8
+    all_steps = list(steps or [])
+    if extra is not None:
+        all_steps = [s for s in all_steps if s.id != extra.id] + [extra]
+    warns: list[str] = []
+    for s in all_steps:
+        paths = step_paths(s)
+        if not paths:
+            continue
+        if len(paths) >= BREADTH_THRESHOLD:
+            warns.append(
+                f"{s.id} broad scope: {len(paths)} path[] entries "
+                f"(>={BREADTH_THRESHOLD}); warn-first, no gate; {SCOPE_HINT}"
+            )
+            continue
+        if root is not None:
+            try:
+                from rfg.types import expand_dir_paths as _expand
+            except Exception:
+                _expand = None  # type: ignore
+            if _expand is None:
+                continue
+            try:
+                expanded = _expand(str(root), list(paths))
+            except Exception:
+                continue
+            # nur Dir-Expansion zaehlt hier (reine File-Listen sind oben abgedeckt)
+            has_dir = False
+            try:
+                rp = Path(str(root))
+                for p in paths:
+                    if (rp / p).is_dir():
+                        has_dir = True
+                        break
+            except Exception:
+                has_dir = False
+            if has_dir and len(expanded) > int(_MAX_FILES):
+                warns.append(
+                    f"{s.id} broad scope: dir entry expands to {len(expanded)} files "
+                    f"(>{int(_MAX_FILES)} MAX_FILES); warn-first, no gate; {SCOPE_HINT}"
+                )
+    # dedup preserve order
+    seen: set[str] = set()
+    out: list[str] = []
+    for w in warns:
+        if w not in seen:
+            seen.add(w)
+            out.append(w)
+    return out
+
 
 def unknown_engine_warnings(steps: list[Step], extra: Step | None = None) -> list[str]:
     """Hand-edited roadmaps can carry engines plan-time validation never saw."""
@@ -117,7 +188,9 @@ def verify_bins(cmd: str) -> list[str]:
     return bins
 
 
-def oracle_warnings(steps: list[Step], extra: Step | None = None) -> list[str]:
+def oracle_warnings(
+    steps: list[Step], extra: Step | None = None, root: str | Path | None = None
+) -> list[str]:
     warns: list[str] = []
     all_steps = list(steps)
     if extra is not None:
@@ -135,6 +208,29 @@ def oracle_warnings(steps: list[Step], extra: Step | None = None) -> list[str]:
             continue
         if cmd.strip() in BARE_SUITE:
             warns.append(f"{s.id} verify is a whole-suite command ({cmd.strip()})")
+            # KD-2: whole-suite verify on broad scope is extra smelly
+            # (scoped claim, unscoped proof). Warn-first, no gate.
+            try:
+                _paths0 = step_paths(s)
+                _broad = len(_paths0) >= BREADTH_THRESHOLD
+                if not _broad and root is not None:
+                    try:
+                        from rfg.types import expand_dir_paths as _exp0
+                        from rfg.context import MAX_FILES as _MF0
+                    except Exception:
+                        _exp0, _MF0 = None, 8  # type: ignore
+                    if _exp0 is not None:
+                        try:
+                            _broad = len(_exp0(str(root), list(_paths0))) > int(_MF0)
+                        except Exception:
+                            _broad = False
+                if _broad:
+                    warns.append(
+                        f"{s.id} whole-suite verify on broad scope "
+                        f"({len(_paths0)} path[] entries); warn-first, no gate; {SCOPE_HINT}"
+                    )
+            except Exception:
+                pass
         if is_weak_verify(cmd):
             warns.append(f"{s.id} weak-verify (existence assert or fallback)")
         if is_sham_verify(cmd, engine=s.engine):
@@ -147,17 +243,38 @@ def oracle_warnings(steps: list[Step], extra: Step | None = None) -> list[str]:
             from rfg.types import expand_dir_paths  # local to avoid cycle
         except Exception:
             expand_dir_paths = None  # type: ignore
-        for tok in cmd.replace("'", " ").replace('"', " ").split():
-            if ("/" in tok or tok.endswith(".py")) and not tok.startswith("-"):
-                rel = tok.lstrip("./")
-                # conventional src/ vs tests/ split is not noise-worthy
-                if rel.startswith("tests/") or rel.startswith("test/"):
-                    continue
-                if "/tests/" in rel or "/test/" in rel:
-                    continue
-                if rel not in paths and not any(rel.endswith(p) or p.endswith(rel) for p in expanded):
-                    if any(rel.endswith(ext) for ext in (".py", ".go", ".ts", ".rs", ".cc")):
-                        warns.append(f"{s.id} verify names {rel} outside path")
+        # KD-2: Dir-path[] via expand_dir_paths einbeziehen (wenn root bekannt),
+        # damit Dir-Claim vs File-Verify ausserhalb nicht durchrutscht.
+        if root is not None and expand_dir_paths is not None:
+            try:
+                expanded = expand_dir_paths(str(root), list(paths)) or list(paths)
+            except Exception:
+                expanded = list(paths)
+        is_survey = (s.engine or "").strip() == "survey"
+        is_test_oracle = (s.oracle or "test") == "test"
+        # File-verify ausserhalb path[] (KD-2: survey-exempt bleibt).
+        if is_test_oracle and not is_survey:
+            for tok in cmd.replace("'", " ").replace('"', " ").split():
+                if ("/" in tok or tok.endswith(".py")) and not tok.startswith("-"):
+                    rel = tok.lstrip("./")
+                    # conventional src/ vs tests/ split is not noise-worthy
+                    if rel.startswith("tests/") or rel.startswith("test/"):
+                        continue
+                    if "/tests/" in rel or "/test/" in rel:
+                        continue
+                    if rel not in paths and not any(rel.endswith(p) or p.endswith(rel) for p in expanded):
+                        if any(rel.endswith(ext) for ext in (".py", ".go", ".ts", ".rs", ".cc")):
+                            # KD-2: Dir-Praefix zaehlt als Referenz
+                            # (path[] dir/ deckt verify dir/file ab).
+                            nrel = normalize_path_token(rel)
+                            covered = any(
+                                nrel == e or nrel.startswith(e + "/") or e.startswith(nrel + "/")
+                                for e in (normalize_path_token(p) for p in expanded)
+                            )
+                            if not covered:
+                                warns.append(
+                                    f"{s.id} verify names {rel} outside path; {SCOPE_HINT}"
+                                )
         # Meridian M7: a scoped verify that touches no path[] entry smells
         # like sham coverage (pricing claimed, core tested). Heuristic on
         # the command text only: warn when the verify names explicit
@@ -192,8 +309,13 @@ def oracle_warnings(steps: list[Step], extra: Step | None = None) -> list[str]:
                 ):
                     shown = ", ".join(paths[:3])
                     warns.append(
-                        f"{s.id} verify does not reference any path[] entry ({shown}); scoped elsewhere?"
+                        f"{s.id} verify does not reference any path[] entry ({shown}); "
+                        f"scoped elsewhere?; {SCOPE_HINT}"
                     )
+    try:
+        warns.extend(breadth_warnings(all_steps))
+    except Exception:
+        pass
     seen: set[str] = set()
     out: list[str] = []
     for w in warns:
@@ -201,6 +323,46 @@ def oracle_warnings(steps: list[Step], extra: Step | None = None) -> list[str]:
             seen.add(w)
             out.append(w)
     return out
+
+
+def epic_warnings(steps: list[Step], epic: str = "") -> list[str]:
+    """Epic-Scope-Warnungen (GS3, warn-first, nie ein Gate).
+
+    - unbekanntes/leeres Epic (kein Step traegt den Praefix) -> Warnung,
+      kein Exit, kein Code 5.
+    Reine String-Praefixe via :mod:`rfg.scope`, stdlib-only.
+    """
+    from rfg.scope import unknown_epic_warning as _unknown
+
+    warns: list[str] = []
+    if epic:
+        w = _unknown([s.id for s in steps or []], epic)
+        if w:
+            warns.append(w + " (warn-first, no gate)")
+    return warns
+
+
+def stale_epic_warnings(rm, state) -> list[str]:
+    """Stale Epics: Gruppe vorhanden, aber nichts verified/ready.
+
+    Rein warnend (warn-first), kein Gate, kein Exit.
+    """
+    from rfg.dag import step_status as _status
+    from rfg.scope import epic_of as _epic_of
+
+    groups: dict[str, list] = {}
+    for s in rm.steps or []:
+        e = _epic_of(s.id)
+        if e:
+            groups.setdefault(e, []).append(s)
+    warns: list[str] = []
+    for e in sorted(groups):
+        members = groups[e]
+        verified = sum(1 for s in members if _status(rm, state, s) == "verified")
+        ready = sum(1 for s in members if _status(rm, state, s) in ("ready", "claimed", "in_progress"))
+        if verified == 0 and ready == 0:
+            warns.append(f"stale epic {e!r} ({len(members)} steps, none verified/ready); warn-first, no gate")
+    return warns
 
 
 def structure_warnings(steps: list[Step]) -> list[dict]:
@@ -333,6 +495,26 @@ def run(root: str | Path) -> dict:
         except Exception:
             pass
     checks["oracles"] = {"ok": True, "detail": oracle_warn or "ok"}
+    epic_notes: list[str] = []
+    epic_summary = "ok"
+    if st.exists() and schema_ok:
+        try:
+            _rm = st.load_roadmap()
+            _state = st.load_state()
+            epic_notes = stale_epic_warnings(_rm, _state)
+            from rfg.scope import epic_of as _eo
+
+            _counts: dict[str, int] = {}
+            for _s in _rm.steps or []:
+                _e = _eo(_s.id)
+                if _e:
+                    _counts[_e] = _counts.get(_e, 0) + 1
+            epic_summary = ", ".join(f"{e}:{n}" for e, n in sorted(_counts.items())) or "none"
+            if epic_notes:
+                epic_summary += " | " + "; ".join(epic_notes)
+        except Exception:
+            pass
+    checks["epics"] = {"ok": True, "detail": epic_summary}
     rust_note = ""
     if "rust" in (langs or []) and not caps.rust_analyzer_ok():
         rust_note = "replace on .rs with macros is exit 4; use engine manual/implement"

@@ -214,6 +214,8 @@ class Oracle:
 @dataclass
 class Budget:
     max_applies: int = 0  # 0 = unlimited
+    max_seconds: float = 0.0  # 0 = disabled (today's behavior)
+    max_related: int = 0  # 0 = disabled (today's behavior)
 
 
 @dataclass

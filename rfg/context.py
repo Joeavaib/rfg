@@ -228,13 +228,33 @@ def _snippet_paths(root: Path, rm: Roadmap, step: Step, *, sources: bool) -> tup
     return _expand_paths(root, ordered), src_out
 
 
-def _snippets(root: Path, rm: Roadmap, step: Step, *, sources: bool) -> tuple[list[dict], list[str]]:
+def _snippets_ex(
+    root: Path, rm: Roadmap, step: Step, *, sources: bool
+) -> tuple[list[dict], list[str], dict]:
+    """Snippets plus Kappungs-Metadaten (KD-3, warn-first, kein Gate).
+
+    Meldet Kappung durch MAX_FILES / MAX_CHARS / MAX_TOTAL_LINES via
+    ``truncated`` plus ``omitted``-Zaehler. Anzeige kappt, Disk-Dateien
+    bleiben voll; --max-chars 0 = unlimited (K11-Regel, siehe rfg/tokens.py).
+    """
     paths, src = _snippet_paths(root, rm, step, sources=sources)
+    # MAX_FILES-Kappung: _snippet_paths/_expand_paths deckelt bereits auf
+    # MAX_FILES; zusaetzlich rohe Target-Zahl pruefen (Impact/Cousins).
+    full_targets = list(step_paths(step))
+    truncated = False
+    omitted_files = 0
+    omitted_lines = 0
+    if len(full_targets) > MAX_FILES:
+        truncated = True
+        omitted_files += len(full_targets) - MAX_FILES
+    if len(paths) > MAX_FILES:
+        truncated = True
+        omitted_files += len(paths) - MAX_FILES
     frm = step.replace.from_pat if step.replace else ""
     out = []
     used = 0
     nlines = 0
-    for rel in paths[:MAX_FILES]:
+    for idx, rel in enumerate(paths[:MAX_FILES]):
         full = root / rel
         if not full.is_file():
             if not sources:
@@ -269,16 +289,41 @@ def _snippets(root: Path, rm: Roadmap, step: Step, *, sources: bool) -> tuple[li
         else:
             picked = list(range(min(MAX_HEAD, len(lines))))
         if nlines + len(picked) > MAX_TOTAL_LINES:
-            picked = picked[: max(0, MAX_TOTAL_LINES - nlines)]
+            allowed = max(0, MAX_TOTAL_LINES - nlines)
+            omitted_lines += len(picked) - allowed
+            picked = picked[:allowed]
+            truncated = True
         chunk = [{"n": n + 1, "text": lines[n][:200]} for n in picked]
         blob = "\n".join(c["text"] for c in chunk)
         if used + len(blob) > MAX_CHARS:
+            truncated = True
+            # Rest-Dateien plus Rest-Zeilen dieser Datei entfallen
+            omitted_files += len(paths[:MAX_FILES]) - idx
+            try:
+                omitted_lines += max(0, len(lines) - len(chunk))
+            except Exception:
+                pass
             break
         used += len(blob)
         nlines += len(chunk)
         out.append({"path": rel, "lines": chunk})
         if nlines >= MAX_TOTAL_LINES:
+            truncated = True
+            omitted_files += max(0, len(paths[:MAX_FILES]) - (idx + 1))
             break
+    if omitted_files or omitted_lines:
+        truncated = True
+    info = {
+        "truncated": bool(truncated),
+        "omitted": int(omitted_files),
+        "omitted_files": int(omitted_files),
+        "omitted_lines": int(omitted_lines),
+    }
+    return out, src, info
+
+
+def _snippets(root: Path, rm: Roadmap, step: Step, *, sources: bool) -> tuple[list[dict], list[str]]:
+    out, src, _info = _snippets_ex(root, rm, step, sources=sources)
     return out, src
 
 
@@ -300,6 +345,8 @@ def packet(root: str | Path, rm: Roadmap, state: State, step: Step | None, *, so
             "engine": "",
             "path": [],
             "snippets": [],
+            "truncated": False,
+            "omitted": 0,
             "edges": [],
             "tick": "done",
             "verify": rm.verify,
@@ -310,8 +357,19 @@ def packet(root: str | Path, rm: Roadmap, state: State, step: Step | None, *, so
     exists, missing = path_split(root, paths)
     fat = bool(sources) or not is_contract(eng)
     snippets, src = ([], [])
+    trunc_info: dict = {"truncated": False, "omitted": 0, "omitted_files": 0, "omitted_lines": 0}
     if fat:
-        snippets, src = _snippets(root, rm, step, sources=sources)
+        snippets, src, trunc_info = _snippets_ex(root, rm, step, sources=sources)
+    else:
+        # contract ohne snippets meldet MAX_FILES-Kappung trotzdem
+        # (snippets leben auf context; Anzeige kappt, Disk voll).
+        if len(paths) > MAX_FILES:
+            trunc_info = {
+                "truncated": True,
+                "omitted": int(len(paths) - MAX_FILES),
+                "omitted_files": int(len(paths) - MAX_FILES),
+                "omitted_lines": 0,
+            }
     preview = None
     if fat and step.replace and step.replace.from_pat and not is_stop_engine(eng):
         try:
@@ -345,6 +403,10 @@ def packet(root: str | Path, rm: Roadmap, state: State, step: Step | None, *, so
         "edge": step.edge,
         "status": dag.step_status(rm, state, step),
         "snippets": snippets,
+        "truncated": bool(trunc_info.get("truncated")),
+        "omitted": int(trunc_info.get("omitted") or 0),
+        "omitted_files": int(trunc_info.get("omitted_files") or 0),
+        "omitted_lines": int(trunc_info.get("omitted_lines") or 0),
         "sources": src if sources else [],
         "preview": preview,
         "edges": step_edges,

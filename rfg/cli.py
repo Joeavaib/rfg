@@ -39,6 +39,29 @@ def _gate_runnable(cmd: str) -> bool:
     return shutil.which(first) is not None
 
 
+def _parse_epic_arg(args: list[str] | None) -> str:
+    """--epic Filter aus CLI-Args lesen (``--epic GS`` / ``--epic=GS``).
+
+    Reiner Anzeige-Filter, kein neues Verb, keine MCP-Flaeche, kein Gate:
+    unbekannte Epics warnen (``warning``-Feld), exiten nie 5.
+    """
+    epic = ""
+    argv = list(args or [])
+    i = 0
+    while i < len(argv):
+        a = argv[i]
+        if a == "--epic" and i + 1 < len(argv):
+            epic = argv[i + 1]
+            i += 2
+            continue
+        if a.startswith("--epic="):
+            epic = a.split("=", 1)[1]
+            i += 1
+            continue
+        i += 1
+    return epic
+
+
 def current_agent() -> str:
     return (os.environ.get("RFG_AGENT") or "").strip()
 
@@ -69,6 +92,39 @@ def cross_timeout_for(remaining_s: float, default_s: float) -> float:
     if remaining_s <= 0:
         return 5.0
     return min(default_s, remaining_s)
+
+
+def cross_budget_note(related_total, elapsed_s, budget) -> str:
+    """Warn-only note when cross scope exceeds Budget (XB, never a gate).
+
+    related_total > max_related or elapsed > max_seconds yields a label
+    string; otherwise "". max_* = 0 disables (today's behavior). Pure
+    function, stdlib-only, changes no exit (D3 pattern: label only).
+    """
+    try:
+        total = int(related_total)
+    except (TypeError, ValueError):
+        total = 0
+    try:
+        elapsed = float(elapsed_s)
+    except (TypeError, ValueError):
+        elapsed = 0.0
+    try:
+        max_related = int(getattr(budget, "max_related", 0) or 0)
+    except (TypeError, ValueError):
+        max_related = 0
+    try:
+        max_seconds = float(getattr(budget, "max_seconds", 0) or 0)
+    except (TypeError, ValueError):
+        max_seconds = 0.0
+    parts: list[str] = []
+    if max_related > 0 and total > max_related:
+        parts.append(f"related_total {total} > max_related {max_related}")
+    if max_seconds > 0 and elapsed > max_seconds:
+        parts.append(f"elapsed {elapsed:.1f}s > max_seconds {max_seconds:g}s")
+    if not parts:
+        return ""
+    return "budget: " + "; ".join(parts)
 
 
 def triage_cross_failure(code: int, output: str, was_red_before: bool) -> str:
@@ -226,7 +282,8 @@ Unknown --engine fails fast (exit 4) instead of failing at tick.
     "next": """rfg next — next free step plus ready[] and recommend
 
 Usage:
-  rfg next
+  rfg next [--epic PREFIX]
+Epic filter is display-only (warn-first, never a gate, no MCP param).
 """,
     "context": """rfg context — step contract (want, path, missing, verify)
 
@@ -453,22 +510,45 @@ class CLI:
             d["risk"] = rs
         return d
 
-    def cmd_next(self) -> int:
+    def cmd_next(self, args: list[str] | None = None) -> int:
         try:
             _, rm, state = self.load()
         except FileNotFoundError as e:
             self.emit_err("next", str(e))
             return USAGE
+        epic = _parse_epic_arg(args)
         sid = dag.next_id(rm, state)
         step = dag.step_by_id(rm, sid) if sid else None
         rec, rec_why = dag.recommend(rm, state)
-        body = self._step_json(rm, state, step, dag.blocked_reason(rm, state))
         ready = dag.ready_ids(rm, state)
+        warning = ""
+        if epic:
+            from rfg import scope as _scope
+
+            scoped = [s for s in ready if _scope.epic_of(s) == epic]
+            w = _scope.unknown_epic_warning([s.id for s in rm.steps], epic)
+            if w:
+                warning = w
+            if scoped:
+                sid = scoped[0]
+                step = dag.step_by_id(rm, sid) if sid else None
+                rec, rec_why = dag.recommend(rm, state, epic)
+                ready = scoped
+            else:
+                sid = ""
+                step = None
+                rec, rec_why = "", (warning or f"unknown epic {epic!r}")
+                ready = []
+        body = self._step_json(rm, state, step, dag.blocked_reason(rm, state))
         body["ready"] = ready[:8]
         if len(ready) > 8:
             body["ready_omitted"] = len(ready) - 8
         body["recommend"] = rec or None
         body["recommend_reason"] = rec_why
+        if epic:
+            body["epic"] = epic
+        if warning:
+            body["warning"] = warning
         self.emit("next", body)
         return OK
 
@@ -916,6 +996,17 @@ class CLI:
             st.write_state(state)
         out = dag.slim_plan(rm, state)
         steps = out.get("steps") or []
+        epic = _parse_epic_arg(args)
+        epic_warning = ""
+        if epic:
+            from rfg import scope as _scope
+
+            steps = [s for s in steps if _scope.epic_of(s.get("id") or "") == epic]
+            out["epic"] = epic
+            w = _scope.unknown_epic_warning([s.id for s in rm.steps], epic)
+            if w:
+                epic_warning = w
+                out["warning"] = w
         out["counts"] = {
             "total": len(steps),
             "ready": sum(1 for s in steps if s.get("status") in ("ready", "claimed", "in_progress")),
@@ -925,6 +1016,8 @@ class CLI:
             out["list"] = True
             if warns:
                 out["warnings"] = warns
+            if epic_warning:
+                out.setdefault("warnings", []).append(epic_warning)
             if tc_notes:
                 out["toolchain"] = tc_notes
             if profile_switched:
@@ -959,8 +1052,14 @@ class CLI:
             out["verify"] = _src.verify
         if impact_note:
             out["impact"] = {"hits": 0, "note": impact_note}
+        if epic:
+            out["epic"] = epic
+        if epic_warning:
+            out["warning"] = epic_warning
         if warns:
             out["warnings"] = warns
+        if epic_warning:
+            out.setdefault("warnings", []).append(epic_warning)
         if tc_notes:
             out["toolchain"] = tc_notes
         if profile_switched:
@@ -1476,6 +1575,12 @@ class CLI:
         memo_on = os.environ.get("RFG_DEDUP_MEMO") == "1"
         memo: dict[tuple[str, str], tuple[int, str, str, str]] = {}
         deduped: list[dict] = []
+        # XB: cross-section elapsed for budget_note (warn-only, D4-style
+        # measure-only; never ordering, deadline, or gates).
+        try:
+            _cross_t0 = _time.monotonic()
+        except Exception:
+            _cross_t0 = 0.0
         for rid in related:
             rs = dag.step_by_id(rm, rid)
             if not rs:
@@ -1560,12 +1665,52 @@ class CLI:
         try:
             # D5: depth-2 dry-run counter (warn-only measurement).
             from rfg.verify import depth2_ids as _depth2
+            from rfg.verify import depth2_warn_threshold as _d2_thr
 
             _d2 = _depth2(rm.steps, step)
+            try:
+                _d2_thr_val = _d2_thr()
+            except Exception:
+                _d2_thr_val = 10
         except Exception:
             _d2 = []
+            _d2_thr_val = 10
         if _d2:
             payload["depth2_would_warn"] = _d2
+        # XB: depth-2 warn count/threshold (warn-only label, never gates,
+        # exit unchanged; log path already in payload["log"] per D3).
+        try:
+            payload["depth2_warn"] = {"count": len(_d2), "threshold": int(_d2_thr_val)}
+        except Exception:
+            payload["depth2_warn"] = {"count": len(_d2), "threshold": 10}
+        # XB: truncation visibility (warn-only; ranking/cap/exit unchanged).
+        try:
+            from rfg.verify import related_total_count as _rtotal
+
+            _rtotal_val = int(_rtotal(rm.steps, step))
+        except Exception:
+            try:
+                _rtotal_val = len(related)
+            except Exception:
+                _rtotal_val = 0
+        try:
+            _rlen = len(related)
+        except Exception:
+            _rlen = 0
+        payload["related_total"] = _rtotal_val
+        payload["related_truncated"] = bool(_rtotal_val > _rlen)
+        # XB: cross-budget note (warn-only; RFG_CROSS_BUDGET deadline,
+        # all exits, and max_applies path unchanged; max_*=0 disables).
+        try:
+            _cross_elapsed = (_time.monotonic() - _cross_t0) if _cross_t0 else 0.0
+        except Exception:
+            _cross_elapsed = 0.0
+        try:
+            _bn = cross_budget_note(_rtotal_val, _cross_elapsed, rm.budget)
+        except Exception:
+            _bn = ""
+        if _bn:
+            payload["budget_note"] = _bn
         self.emit("verify", payload)
         self._backup_best_effort()
         return OK
@@ -1935,6 +2080,18 @@ class CLI:
             self.emit_err("progress", str(e))
             return USAGE
         data = progress.report(self.root, rm, state)
+        epic = _parse_epic_arg(args)
+        if epic:
+            from rfg import scope as _scope
+
+            data["epic"] = epic
+            data["ready"] = [s for s in data.get("ready") or [] if _scope.epic_of(s) == epic]
+            nxt = data.get("next")
+            if nxt and _scope.epic_of(nxt) != epic:
+                data["next"] = data["ready"][0] if data["ready"] else None
+            w = _scope.unknown_epic_warning([s.id for s in rm.steps], epic)
+            if w:
+                data["warning"] = w
         self.emit("progress", data, ok=bool(data.get("ok")))
         return OK
 
@@ -2522,7 +2679,7 @@ def main(argv: list[str] | None = None) -> int:
         "init": lambda: c.cmd_init(rest),
         "status": c.cmd_status,
         "plan": lambda: c.cmd_plan(rest),
-        "next": c.cmd_next,
+        "next": lambda: c.cmd_next(rest),
         "context": lambda: c.cmd_context(rest),
         "tick": lambda: c.cmd_tick(rest),
         "apply": lambda: c.cmd_apply(rest),

@@ -1,0 +1,43 @@
+version: 3
+id: recipe-epic-campaign
+hypothesis:
+  id: h-epic
+  statement: Scale a campaign by epic prefix (one prefix, linked chain)
+goal:
+  id: g-epic
+  statement: Epic-scoped campaign chain (filter, group, docs)
+  profile: feature
+steps:
+  - id: EC1-scope
+    title: Define epic prefix helpers
+    engine: implement
+    paths:
+      - rfg/scope.py
+    verify: python3 -m pytest tests/test_gs_scope.py::GsEpicScopeTest -q
+  - id: EC2-filter
+    title: Filter plan/next/progress by epic
+    depends_on:
+      - EC1-scope
+    engine: implement
+    paths:
+      - rfg/cli.py
+      - rfg/dag.py
+    verify: python3 -m pytest tests/test_gs_scope.py::GsEpicFilterTest -q
+  - id: EC3-groups
+    title: Group progress by epic
+    depends_on:
+      - EC2-filter
+    engine: implement
+    paths:
+      - rfg/progress.py
+      - rfg/doctor.py
+    verify: python3 -m pytest tests/test_gs_scope.py::GsProgressGroupsTest -q
+  - id: EC4-docs
+    title: Document scope scaling plus recipe
+    depends_on:
+      - EC3-groups
+    engine: implement
+    paths:
+      - docs/scope-scaling.md
+      - rfg/data/recipes/epic-campaign.yaml
+    verify: python3 -m pytest tests/test_gs_scope.py::GsScopeDocsTest -q

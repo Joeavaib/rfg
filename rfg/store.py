@@ -9,6 +9,14 @@ from rfg.yamlio import marshal_roadmap, unmarshal_roadmap
 DIR = ".rfg"
 
 
+def claim_held_payload(st: State) -> dict[str, str]:
+    """Machine-readable holder for claim conflicts (claimed_by, claim_step)."""
+    return {
+        "claimed_by": st.claim_agent or "",
+        "claim_step": st.claim_step or "",
+    }
+
+
 class Store:
     def __init__(self, root: str | Path) -> None:
         self.root = Path(root)

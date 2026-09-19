@@ -138,6 +138,41 @@ class GapsTest(unittest.TestCase):
         code, raw, err = self.rfg_raw("land", "--format", "json")
         self.assertEqual(code, 3, raw + err)
 
+    def test_land_gate_table(self):
+        # QW-04: Land-Gate-Tabelle — jede Zeile ein Pin (Exit + Meldung).
+        doc = (ROOT / "docs" / "factory-line.md").read_text(encoding="utf-8")
+        self.assertIn("Land-Gate-Tabelle", doc)
+        self.assertIn("applied but not verified", doc)
+        # (a) offene Steps -> Exit 5.
+        Path(self.td, "a.py").write_text("a = 1\n")
+        self.git()
+        self.rfg("init")
+        self.rfg("plan", "--step", "g1", "--engine", "implement",
+                 "--path", "a.py", "--want", "w", "--verify", "test -n ok")
+        code, raw, err = self.rfg_raw("land", "--format", "json")
+        self.assertEqual(code, 5, raw + err)
+        self.assertIn("unfinished", raw + err)
+        # (b) applied aber nicht verifiziert -> Exit 5 (andere Meldung).
+        self.rfg("tick", "g1")
+        self.rfg("apply", "g1")
+        code, raw, err = self.rfg_raw("land", "--format", "json")
+        self.assertEqual(code, 5, raw + err)
+        self.assertIn("not verified", raw + err)
+        # (c) dirty tracked Root ohne Steps -> Exit 3.
+        td2 = tempfile.mkdtemp(prefix="rfg-gaps-dirty-")
+        self.addCleanup(shutil.rmtree, td2, ignore_errors=True)
+        Path(td2, "b.py").write_text("b = 1\n")
+        old_td, self.td = self.td, td2
+        try:
+            self.git()
+            self.rfg("init")
+            Path(td2, "b.py").write_text("b = 2\n")
+            code, raw, err = self.rfg_raw("land", "--format", "json")
+            self.assertEqual(code, 3, raw + err)
+            self.assertIn("dirty", raw + err)
+        finally:
+            self.td = old_td
+
     def test_manual_apply_stages_new_file(self):
         self.git_go()
         self.rfg("init")

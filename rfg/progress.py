@@ -88,6 +88,30 @@ def report(root: str, rm: Roadmap, state: State) -> dict:
                 "detail": f"held by {state.claim_agent or 'unknown'}",
             }
         )
+    try:
+        from rfg import ledger as _ledger
+
+        for fn in _ledger.stale_functions(root):
+            exceptions.append(
+                {
+                    "kind": "stale",
+                    "step": "",
+                    "detail": f"ledger stale_functions {fn} (tombstone parked)",
+                }
+            )
+    except Exception:
+        pass
+    try:
+        diag = gitops.worktree_diagnosis(root)
+        status = diag.get("status") or "usable"
+        if status in ("foreign-gitdir", "broken-gitdir") or (
+            status == "missing" and state.worktree
+        ):
+            exceptions.append(
+                {"kind": "worktree", "step": "", "detail": diag.get("detail") or status}
+            )
+    except Exception:
+        pass
     acc_code, acc_out, _acc = accept.run_all(root, rm)
     if acc_code != 0:
         exceptions.append({"kind": "acceptance", "step": "", "detail": (acc_out or "acceptance failed").strip()[:300]})

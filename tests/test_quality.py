@@ -27,6 +27,12 @@ class QualityTest(unittest.TestCase):
                 "from rfg.mod import foo\ndef test_x():\n    assert foo() == 2\n")
             code, report = dc.check(td, "HEAD")
             self.assertEqual(code, 0, report)
+            # QG-03: comment-only mention is decoration, not coverage.
+            (Path(td) / "tests" / "test_mod.py").write_text(
+                "# foo is great\ndef test_x():\n    assert True\n")
+            code, report = dc.check(td, "HEAD")
+            self.assertEqual(code, 2, report)
+            self.assertIn("foo", report)
 
     def test_property_coerce(self):
         import json, random
@@ -55,13 +61,26 @@ class QualityTest(unittest.TestCase):
                 self.assertNotIn("]", dep, s)
                 self.assertNotIn('"', dep, s)
         self.assertEqual(coerce_depends_list("a[b]c"), ["a[b]c"])
-        # path coercion keeps every file (no silent drop)
+        # path coercion keeps every relative file (no silent drop);
+        # absolute / DotDot paths raise (QD-12 exit 4), never accepted.
+        from pathlib import Path as _P
         for _ in range(200):
             n = rng.randint(0, 3)
             paths = ["".join(rng.choice("ab019/_-.") for _ in range(rng.randint(1, 12)))
                      for _ in range(n)]
-            got = coerce_path_list(list(paths))
-            self.assertEqual(sorted(got), sorted(p for p in paths if p))
+            safe, bad = [], []
+            for p in paths:
+                if not p:
+                    continue
+                if p.startswith("/") or p.startswith("\\") or ".." in _P(p).parts:
+                    bad.append(p)
+                else:
+                    safe.append(p)
+            for p in bad:
+                with self.assertRaises(ValueError):
+                    coerce_path_list([p])
+            got = coerce_path_list(list(safe))
+            self.assertEqual(sorted(got), sorted(safe))
 
     def test_property_yamlio_roundtrip(self):
         import random
@@ -95,6 +114,35 @@ class QualityTest(unittest.TestCase):
         code, report = ms.run(Path(__file__).resolve().parent.parent)
         self.assertEqual(code, 0, report)
         self.assertIn("killed 4/4", report)
+
+    def test_mutation_sample_parallel_safe(self):
+        """Two concurrent runs must both kill 4/4 (copy isolation).
+
+        Red-test for QB-01: with in-place mutation the two runs race on
+        the same files (anchor missing / restored mid-run) and at least
+        one run reports survivors; with temp copies both stay green.
+        """
+        import threading
+        from scripts import mutation_sample as ms
+        from pathlib import Path
+        root = Path(__file__).resolve().parent.parent
+        results: list[tuple[int, str]] = []
+        lock = threading.Lock()
+
+        def one() -> None:
+            code, report = ms.run(root)
+            with lock:
+                results.append((code, report))
+
+        threads = [threading.Thread(target=one) for _ in range(2)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(timeout=600)
+        self.assertEqual(len(results), 2, results)
+        for code, report in results:
+            self.assertEqual(code, 0, report)
+            self.assertIn("killed 4/4", report)
 
 
 if __name__ == "__main__":

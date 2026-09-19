@@ -40,3 +40,21 @@ sondern Exit 4 statt „all good".
 - **REZEPT** — nicht in Kern, als Rezept/Doku-Beispiel außerhalb.
 - **SCHLUESSEL** — nur als explizites Opt-in (`Flag`/`RFG_*=1`), Default bleibt Nein.
 - **STOPP** — jenseits, Fabrik. Nicht bauen, Exit-4-Fall bleibt.
+
+## Suite-Vorher/Nachher (Riesen-Patch-Protokoll, QB-02)
+
+- **Vorher (A):** volle Suite grün + Laufzeit festhalten (`pytest tests/ -q`, Zeit notieren). Ohne grünes A kein Patch.
+- **Nachher (B):** gleiche Suite + `scripts/mutation_sample.py` (Kill-Bericht). B rot oder Kill-Rate gefallen → kein Land.
+- Beleg ins Log: Suite-Zeit + Kill-Bericht gehören ins Step-Verify-Log (`.rfg/verify/`), nie aus dem Kopf.
+
+## Land-Gate-Tabelle (QW-04)
+
+`land` kopiert erst nach Re-Verify; jede Zeile ist ein Test-Pin in `tests/test_gaps.py`:
+
+- Offene Steps (`next` gesetzt) oder `failed` nicht leer → Exit 5 (`roadmap unfinished`).
+- `applied` aber nicht `verified` → Exit 5 (`applied but not verified`); `verified != done` ist enforced, nicht empfohlen.
+- Tracked-dirty Root ohne separaten Stop-Engine-Worktree → Exit 3 (`working tree dirty`).
+- Triviales Verify (`true`/leer) im Worktree-Pfad → Revert + Exit 4 (kein Beweis, kein Land).
+- Step-Verify, Suite-Gate (`rm.verify`) oder Acceptance rot → Revert + Exit 2 (Worktree-Copy wird zurückgerollt).
+- Fehlende Toolchain im Gate → Skip mit Log (Exit 4-Eintrag), nie Fail.
+- Alles verifiziert + clean → Exit 0 mit `state_backup` (`land-backups/`).

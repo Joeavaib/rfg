@@ -210,6 +210,44 @@ class McpTokenTest(unittest.TestCase):
         self.assertEqual(applied["result"]["exitCode"], 0, applied)
         self.assertFalse(applied["result"]["isError"], applied)
 
+    def test_root_precedence_table(self):
+        # QM-01: arg > RFG_ROOT > server-cwd, blanks fall through.
+        # FAIL: unklarer Root gewinnt still.
+        from unittest import mock
+
+        from rfg import mcp
+
+        with mock.patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("RFG_ROOT", None)
+            self.assertEqual(mcp._tool_root({"root": "/a"}, "/default"), "/a")
+            self.assertEqual(mcp._tool_root({}, "/default"), "/default")
+            self.assertEqual(mcp._tool_root({"root": ""}, "/default"), "/default")
+            self.assertEqual(mcp._tool_root({"root": "  "}, "/default"), "/default")
+        with mock.patch.dict(os.environ, {"RFG_ROOT": "/env"}):
+            self.assertEqual(mcp._tool_root({}, "/default"), "/env")
+            self.assertEqual(mcp._tool_root({"root": "/a"}, "/default"), "/a",
+                             "explicit arg must win over env")
+            self.assertEqual(mcp._tool_root({"root": ""}, "/default"), "/env")
+            self.assertEqual(mcp._tool_root({"root": "  "}, "/default"), "/env")
+
+    def test_root_arg_beats_env_through_handle(self):
+        from unittest import mock
+
+        from rfg.mcp import handle
+
+        self.git_go()
+        self.rfg("init")
+        other = "/tmp/not-the-repo"
+        with mock.patch.dict(os.environ, {"RFG_ROOT": other}):
+            nxt = handle(
+                {"jsonrpc": "2.0", "id": 9, "method": "tools/call",
+                 "params": {"name": "next", "arguments": {"root": self.td}}},
+                other,
+            )
+        self.assertFalse(nxt["result"]["isError"], nxt)
+        body = json.loads(nxt["result"]["content"][0]["text"])
+        self.assertEqual(body["command"], "next")
+
     def test_skill_mentions_mcp_plan(self):
         text = SKILL.read_text()
         self.assertIn("`plan`", text)

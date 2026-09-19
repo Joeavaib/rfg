@@ -59,6 +59,30 @@ class LedgerEventsTest(unittest.TestCase):
             ledger.record_test_added(root, "clip_output", "t.py::T::test_head", "V20", "pytest t.py -q")
             self.assertIn("clip_output", ledger.stale_functions(root))
 
+    def test_stale_surfaces_in_progress_and_doctor(self):
+        import tempfile
+        from rfg import doctor, ledger, progress
+        from rfg.types import Roadmap, State
+
+        with tempfile.TemporaryDirectory(prefix="rfg-ledger-") as td:
+            root = Path(td)
+            ledger.record_test_added(root, "clip_output", "t.py::T::test_tail", "V19", "pytest t.py -q")
+            ledger.record_test_added(root, "clip_output", "t.py::T::test_head", "V20", "pytest t.py -q")
+            rm = Roadmap()
+            state = State()
+            rep = progress.report(root, rm, state)
+            kinds = {e["kind"] for e in rep.get("exceptions") or []}
+            self.assertIn("stale", kinds, rep.get("exceptions"))
+            self.assertTrue(
+                any("clip_output" in (e.get("detail") or "") for e in rep["exceptions"]),
+                rep["exceptions"],
+            )
+            doc = doctor.run(root)
+            detail = (doc.get("checks") or {}).get("ledger_stale", {}).get("detail")
+            self.assertIn("clip_output", detail)
+            text = Path(__file__).resolve().parents[1].joinpath("rfg", "ledger.py").read_text(encoding="utf-8")
+            self.assertIn("tombstone", text.lower())
+
 
 if __name__ == "__main__":
     unittest.main()

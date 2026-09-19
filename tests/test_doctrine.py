@@ -15,7 +15,7 @@ RFG = ROOT / "rfg"
 
 ALLOWED_SUBPROCESS = {"verify.py", "security.py", "gitops.py", "astgrep.py", "fmtutil.py"}
 FORBIDDEN_IMPORTS = ("socket", "urllib", "http.client", "threading", "multiprocessing")
-DOC_MARKERS = ["T1", "T7", "STEMPEL", "REZEPT", "SCHLUESSEL", "STOPP", "Review-Checkliste"]
+DOC_MARKERS = ["T1", "T7", "STEMPEL", "REZEPT", "SCHLUESSEL", "STOPP", "Review-Checkliste", "Vorher/Nachher"]
 
 
 def _rfg_sources():
@@ -71,6 +71,12 @@ class DoctrineTest(unittest.TestCase):
         doc = (ROOT / "docs" / "factory-line.md").read_text(encoding="utf-8")
         self.assertIn("warn-first", doc)
         self.assertIn("Exit 4", doc)
+
+    def test_baseline_protocol_binds(self):
+        """QB-02: Vorher/Nachher-Protokoll nennt Mittel und Konsequenz."""
+        doc = (ROOT / "docs" / "factory-line.md").read_text(encoding="utf-8")
+        self.assertIn("mutation_sample", doc)
+        self.assertIn("kein Land", doc)
 
 
 if __name__ == "__main__":

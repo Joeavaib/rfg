@@ -2,17 +2,45 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field, asdict
+from pathlib import Path
 from typing import Any
 
 
+def _is_traversal_path(p: str) -> bool:
+    """True for absolute paths and `..` components (never rewrite, exit 4)."""
+    if not p:
+        return False
+    if p.startswith("/") or p.startswith("\\"):
+        return True
+    try:
+        return Path(p).is_absolute() or ".." in Path(p).parts
+    except (ValueError, OSError):
+        return True
+
+
+def _reject_traversal(paths: list[str]) -> list[str]:
+    for p in paths:
+        if _is_traversal_path(p):
+            raise ValueError(f"unsupported: path traversal {p!r}")
+    return paths
+
+
 def coerce_path_list(value: Any) -> list[str]:
-    """Hosts often stringify JSON arrays as one path; split those into files."""
+    """Hosts often stringify JSON arrays as one path; split those into files.
+
+    DotDot (`..`) and absolute paths are unsupported (CLI/MCP exit 4).
+    FAIL: a traversal path is accepted.
+    """
+    return _reject_traversal(_coerce_path_list(value))
+
+
+def _coerce_path_list(value: Any) -> list[str]:
     if value is None or value is False:
         return []
     if isinstance(value, (list, tuple)):
         out: list[str] = []
         for v in value:
-            out.extend(coerce_path_list(v))
+            out.extend(_coerce_path_list(v))
         return [p for p in out if p]
     s = str(value).strip()
     if not s:
@@ -33,7 +61,7 @@ def coerce_path_list(value: Any) -> list[str]:
             except (ValueError, SyntaxError):
                 parsed = None
         if isinstance(parsed, list):
-            return coerce_path_list(parsed)
+            return _coerce_path_list(parsed)
         # unparseable bracket string (e.g. "[A, B]"): strip outer brackets so
         # no broken "[A" / "B]" entries survive; fall through to comma split.
         if s.endswith("]"):

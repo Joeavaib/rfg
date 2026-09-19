@@ -12,7 +12,7 @@ from rfg import SCHEMA_VERSION, __version__, apply as applymod
 from rfg import accept, audit, caps, context, cxxcompile, dag, edges, fleet, fmtutil, gitops, index, oracles as oramod
 from rfg import progress, recipes, risk, scaffold, security, telemetry
 from rfg.detect import FALLBACK_VERIFY, default_verify
-from rfg.store import Store
+from rfg.store import Store, claim_held_payload
 from rfg.types import Budget, Checkpoint, Goal, Hypothesis, Oracle, Replace, Roadmap, Step
 from rfg.types import coerce_depends_list, coerce_path_list, default_engine, is_contract, is_implement, is_mechanical, is_stop_engine, step_observation, step_paths, step_want
 from rfg.verify import clip_output, dispatch as run_verify, is_fallback_verify, is_sham_verify, is_trivial, looks_like_missing_binary, write_log as write_verify_log
@@ -37,6 +37,29 @@ def _gate_runnable(cmd: str) -> bool:
     if "/" in first:
         return True
     return shutil.which(first) is not None
+
+
+def _restrict_sid_to_epic(rm, state, sid: str, epic: str) -> tuple[str, str]:
+    """Bind sid to --epic (warn-first). Never a gate; empty sid if none match."""
+    from rfg import scope as _scope
+
+    warning = ""
+    if not epic:
+        return sid, warning
+    w = _scope.unknown_epic_warning([s.id for s in rm.steps], epic)
+    if w:
+        warning = w
+    if sid and _scope.epic_of(sid) == epic:
+        return sid, warning
+    ready = [x for x in dag.ready_ids(rm, state) if _scope.epic_of(x) == epic]
+    if ready:
+        prev = sid or "next"
+        note = f"epic {epic!r} skipped {prev}; using {ready[0]}"
+        warning = f"{warning}; {note}" if warning else note
+        return ready[0], warning
+    note = f"epic {epic!r} has no ready step"
+    warning = f"{warning}; {note}" if warning else note
+    return "", warning
 
 
 def _parse_epic_arg(args: list[str] | None) -> str:
@@ -204,10 +227,73 @@ def _followup_manual(skipped, frm: str) -> str:
             return "manual"
     return ""
 
+
+def verify_test_files(cmd: str) -> list[str]:
+    """Test-file tokens in a verify command (1-zu-1 Testdatei-Regel)."""
+    seen: list[str] = []
+    for tok in (cmd or "").replace("'", " ").replace('"', " ").split():
+        t = tok.strip().strip("\"'").split("::")[0].lstrip("./")
+        if not t or t.startswith("-") or "=" in t:
+            continue
+        name = Path(t).name.lower()
+        if not t.endswith(".py"):
+            continue
+        if not (
+            name.startswith("test_")
+            or name.endswith("_test.py")
+            or t.startswith("tests/")
+            or "/tests/" in t
+            or t.startswith("test/")
+        ):
+            continue
+        if t not in seen:
+            seen.append(t)
+    return seen
+
+
+def contract_check_findings(steps: list[Step]) -> list[dict]:
+    """plan --check extras: manual want + unique test file per step (QD-03)."""
+    found: list[dict] = []
+    owners: dict[str, list[str]] = {}
+    for s in steps or []:
+        eng = (s.engine or "").strip()
+        if eng == "manual" and not (s.want or "").strip() and not (s.goal or "").strip():
+            found.append(
+                {
+                    "kind": "missing-want",
+                    "step": s.id,
+                    "detail": f"manual step {s.id!r} has no want",
+                }
+            )
+        if eng == "survey":
+            continue
+        for tf in verify_test_files(s.verify or ""):
+            owners.setdefault(tf, []).append(s.id)
+    for tf, ids in owners.items():
+        if len(ids) < 2:
+            continue
+        shown = ", ".join(ids[:8])
+        extra = f" +{len(ids) - 8}" if len(ids) > 8 else ""
+        found.append(
+            {
+                "kind": "shared-test-file",
+                "step": ids[0],
+                "detail": (
+                    f"test file {tf} used by {len(ids)} steps ({shown}{extra}); "
+                    "1-zu-1 Testdatei-Regel"
+                ),
+            }
+        )
+    return found
+
 HELP = """rfg — lead a multi-step refactor locally
 
 Usage:
   rfg [--format json] [--root DIR] [--show-risk] [--max-chars N] <command>
+
+  External --root outside cwd is warn-first (doctor names it). A hard
+  --allow-external-root guard (exit 4) is deferred until gotoharness
+  clients can send that flag; otherwise foreign campaigns break (QM-05).
 
 Global output flags:
   --show-risk        include risk/format blocks (apply/next); default slim
@@ -228,7 +314,7 @@ Commands:
                         (--commit or RFG_AUTO_COMMIT=1 snapshots a local commit; never pushes)
   rollback last        restore the last checkpoint
   backup               list roadmap/state backups in .rfg/land-backups/
-  restore <id>         restore roadmap.yaml+state.json from a backup (exit 4 on unknown id)
+  restore [--dry-run] <id>  restore roadmap.yaml+state.json from a backup (exit 4 on unknown id)
   why                  explain why a step is ready/blocked
   impact [--symbol S]  file/import/export hit counts (index or SCIP)
   index                rebuild incremental file-hash index
@@ -294,7 +380,7 @@ Cousins only with --sources.
     "apply": """rfg apply — apply a step in a git worktree
 
 Usage:
-  rfg apply [STEP] [--dry-run] [--diff] [--agent NAME]
+  rfg apply [STEP] [--dry-run] [--diff] [--force] [--agent NAME]
 """,
     "tick": """rfg tick — apply+verify (replace) or claim+contract (implement/manual)
 
@@ -383,8 +469,10 @@ class CLI:
                 else:
                     print(text)
 
-    def emit_err(self, command: str, msg: str) -> None:
+    def emit_err(self, command: str, msg: str, extra: dict | None = None) -> None:
         env = {"ok": False, "command": command, "error": msg}
+        if extra:
+            env.update(extra)
         if self._capture is not None:
             self._capture.append(env)
             return
@@ -581,15 +669,25 @@ class CLI:
             return USAGE
         sid = dag.next_id(rm, state)
         agent = current_agent()
+        epic = _parse_epic_arg(args)
         i = 0
         while i < len(args):
             if args[i] == "--agent" and i + 1 < len(args):
                 agent = args[i + 1]
                 i += 2
                 continue
+            if args[i] == "--epic" and i + 1 < len(args):
+                i += 2
+                continue
+            if args[i].startswith("--epic="):
+                i += 1
+                continue
             if not args[i].startswith("-"):
                 sid = args[i]
             i += 1
+        epic_warning = ""
+        if epic:
+            sid, epic_warning = _restrict_sid_to_epic(rm, state, sid, epic)
         step = dag.step_by_id(rm, sid) if sid else None
         if step is not None:
             frm = step.replace.from_pat if step.replace else ""
@@ -599,14 +697,27 @@ class CLI:
                 self.emit_err("tick", f"unsupported engine: {step.engine}{hint} (fix via plan --step {step.id} --engine run|implement|manual)")
                 return UNSUPPORTED
         if step is None:
-            self.emit("tick", {"action": "done", "context": context.tick_view(self.root, rm, state, step)})
+            body = {"action": "done", "context": context.tick_view(self.root, rm, state, step)}
+            if epic:
+                body["epic"] = epic
+            if epic_warning:
+                body["warning"] = epic_warning
+            self.emit("tick", body)
             return OK
         if is_stop_engine(step.engine):
             if state.claim_step and state.claim_step != step.id and state.claim_agent:
-                self.emit_err("tick", f"conflict: held {state.claim_step}")
+                self.emit_err(
+                    "tick",
+                    f"conflict: held {state.claim_step}",
+                    claim_held_payload(state),
+                )
                 return CONFLICT
             if not same_claim_client(state, agent):
-                self.emit_err("tick", f"conflict: held by {state.claim_agent}")
+                self.emit_err(
+                    "tick",
+                    f"conflict: held by {state.claim_agent}",
+                    claim_held_payload(state),
+                )
                 return CONFLICT
             if gitops.is_repo(self.root):
                 try:
@@ -637,6 +748,8 @@ class CLI:
                     "after_edit": loc["after_edit"],
                     "claim_agent": state.claim_agent,
                     "context": context.tick_view(self.root, rm, state, step),
+                    **({"epic": epic} if epic else {}),
+                    **({"warning": epic_warning} if epic_warning else {}),
                 },
             )
             self._backup_best_effort()
@@ -688,6 +801,7 @@ class CLI:
                 findings = _struct_w(rm.steps)
             except Exception:
                 findings = []
+            findings.extend(contract_check_findings(rm.steps))
             if "--strict" in (args or []):
                 for s in rm.steps:
                     if (
@@ -755,7 +869,14 @@ class CLI:
                 have = True
             elif a == "--depends":
                 d = val()
-                step.depends_on = coerce_depends_list(d)
+                try:
+                    step.depends_on = coerce_depends_list(d)
+                except ValueError as e:
+                    msg = str(e)
+                    if not msg.startswith("unsupported"):
+                        msg = f"unsupported: {msg}"
+                    self.emit_err("plan", msg)
+                    return UNSUPPORTED
             elif a == "--verify":
                 v = val()
                 if have:
@@ -771,14 +892,30 @@ class CLI:
                 from_impact = True
                 have = True
             elif a == "--path":
-                for p in coerce_path_list(val()):
+                try:
+                    plist = coerce_path_list(val())
+                except ValueError as e:
+                    msg = str(e)
+                    if not msg.startswith("unsupported"):
+                        msg = f"unsupported: {msg}"
+                    self.emit_err("plan", msg)
+                    return UNSUPPORTED
+                for p in plist:
                     if p not in step.paths:
                         step.paths.append(p)
                     if step.replace is not None and p not in step.replace.paths:
                         step.replace.paths.append(p)
                 have = True
             elif a in ("--extras", "--extra", "--extras-path"):
-                for p in coerce_path_list(val()):
+                try:
+                    plist = coerce_path_list(val())
+                except ValueError as e:
+                    msg = str(e)
+                    if not msg.startswith("unsupported"):
+                        msg = f"unsupported: {msg}"
+                    self.emit_err("plan", msg)
+                    return UNSUPPORTED
+                for p in plist:
                     if p and p not in step.extras:
                         step.extras.append(p)
                 have = True
@@ -1075,19 +1212,40 @@ class CLI:
             return USAGE
         sid = dag.next_id(rm, state)
         agent = current_agent()
+        force = False
+        epic = _parse_epic_arg(args)
         i = 0
         while i < len(args):
             if args[i] == "--dry-run":
+                i += 1
+                continue
+            if args[i] == "--force":
+                force = True
                 i += 1
                 continue
             if args[i] == "--agent" and i + 1 < len(args):
                 agent = args[i + 1]
                 i += 2
                 continue
+            if args[i] == "--epic" and i + 1 < len(args):
+                i += 2
+                continue
+            if args[i].startswith("--epic="):
+                i += 1
+                continue
             if not args[i].startswith("-"):
                 sid = args[i]
             i += 1
+        epic_warning = ""
+        if epic:
+            sid, epic_warning = _restrict_sid_to_epic(rm, state, sid, epic)
         if not sid:
+            if epic:
+                self.emit(
+                    "apply",
+                    {"step": None, "epic": epic, "warning": epic_warning or "no free step"},
+                )
+                return OK
             self.emit_err("apply", "no free step")
             return OK
         if rm.budget.max_applies and state.applies_used >= rm.budget.max_applies:
@@ -1097,7 +1255,11 @@ class CLI:
             self.emit_err("apply", f"conflict: step {sid} not claimed (held: {state.claim_step})")
             return CONFLICT
         if not same_claim_client(state, agent):
-            self.emit_err("apply", f"conflict: claimed by {state.claim_agent}")
+            self.emit_err(
+                "apply",
+                f"conflict: claimed by {state.claim_agent}",
+                claim_held_payload(state),
+            )
             return CONFLICT
         step = dag.step_by_id(rm, sid)
         if not step:
@@ -1146,11 +1308,26 @@ class CLI:
         target = self.root
         no_head = gitops.is_repo(self.root) and not gitops.has_head(self.root)
         isolation = False
+        forced_dirty: list[str] = []
         if not self.dry:
             if not gitops.is_repo(self.root):
                 self.emit_err("apply", "not a git repository")
                 return USAGE
             if step.engine == "run" or no_head:
+                # QW-05: run executes blindly at root — on a tracked-dirty
+                # tree that needs explicit --force (names files); stop
+                # engines isolate via worktree, run never does.
+                if step.engine == "run" and not force and gitops.dirty_tracked(self.root):
+                    dirty_files = gitops.dirty_tracked_files(self.root)
+                    named = ", ".join(dirty_files[:10]) or "tracked files"
+                    self.emit_err(
+                        "apply",
+                        f"working tree dirty (tracked): {named}; "
+                        "re-run with --force to run on the dirty root",
+                    )
+                    return DIRTY
+                if step.engine == "run" and force:
+                    forced_dirty = list(gitops.dirty_tracked_files(self.root))
                 target = self.root
                 isolation = False
                 if no_head:
@@ -1183,7 +1360,17 @@ class CLI:
                 if dirty and not is_stop_engine(step.engine):
                     self.emit_err("apply", "working tree dirty")
                     return DIRTY
+                if dirty and is_stop_engine(step.engine) and not force:
+                    dirty_files = gitops.dirty_tracked_files(self.root)
+                    named = ", ".join(dirty_files[:10]) or "tracked files"
+                    self.emit_err(
+                        "apply",
+                        f"working tree dirty (tracked): {named}; "
+                        "re-run with --force to apply onto the dirty root",
+                    )
+                    return DIRTY
                 if dirty and is_stop_engine(step.engine):
+                    forced_dirty = list(gitops.dirty_tracked_files(self.root))
                     target = self.root
                 else:
                     try:
@@ -1410,6 +1597,8 @@ class CLI:
             payload["extra_warning"] = extra_hint
         if step.extras:
             payload["extras"] = list(step.extras)
+        if forced_dirty:
+            payload["forced_dirty"] = forced_dirty
         if no_head:
             payload["warning"] = "no-head-commit"
             payload["no_head_commit"] = True
@@ -1574,6 +1763,9 @@ class CLI:
         # commands run once; reuse is listed, never silent. Default off.
         memo_on = os.environ.get("RFG_DEDUP_MEMO") == "1"
         memo: dict[tuple[str, str], tuple[int, str, str, str]] = {}
+
+        def _memo_key(kind: str, cmd: str) -> tuple[str, str]:
+            return (kind or "", " ".join((cmd or "").split()))
         deduped: list[dict] = []
         # XB: cross-section elapsed for budget_note (warn-only, D4-style
         # measure-only; never ordering, deadline, or gates).
@@ -1593,8 +1785,9 @@ class CLI:
             if not rcmd or is_trivial(rcmd):
                 continue
             rkind = (rs.oracle or "test")
-            if memo_on and (rkind, rcmd) in memo:
-                _m_code, _m_out, _m_log, _m_via = memo[(rkind, rcmd)]
+            mk = _memo_key(rkind, rcmd)
+            if memo_on and mk in memo:
+                _m_code, _m_out, _m_log, _m_via = memo[mk]
                 deduped.append({"step": rid, "via": _m_via, "reason": "identical-command"})
                 if _m_code != 0:
                     cross_failed.append(rid)
@@ -1627,12 +1820,18 @@ class CLI:
                 _elapsed = None
             rlog = write_verify_log(self.root, f"{sid}__cross_{rid}", rcmd, rcode, rout,
                                     elapsed_ms=_elapsed)
-            if memo_on and not (rcode == 2 and "verify timeout" in (rout or "")):
-                memo[(rkind, rcmd)] = (rcode, rout, rlog, rid)
+            if memo_on and rcode == 0:
+                memo[mk] = (rcode, rout, rlog, rid)
             if rcode == 2 and "verify timeout" in (rout or ""):
                 # Degrade, don't fail: a timeout says nothing about
                 # correctness (DYN-4 triage: cost-noise, not regress).
-                skipped.append({"step": rid, "reason": "timeout"})
+                skipped.append(
+                    {
+                        "step": rid,
+                        "reason": "timeout",
+                        "triage": triage_cross_failure(rcode, rout, rid in failed_before),
+                    }
+                )
                 continue
             if rcode != 0:
                 cross_failed.append(rid)
@@ -1702,6 +1901,7 @@ class CLI:
         # XB: cross-budget note (warn-only; RFG_CROSS_BUDGET deadline,
         # all exits, and max_applies path unchanged; max_*=0 disables).
         try:
+            # Cross-section seconds (not per-verify elapsed_ms) feed budget_note.
             _cross_elapsed = (_time.monotonic() - _cross_t0) if _cross_t0 else 0.0
         except Exception:
             _cross_elapsed = 0.0
@@ -1967,13 +2167,24 @@ class CLI:
     def cmd_restore(self, args: list[str]) -> int:
         """Restore roadmap.yaml+state.json from a backup id.
 
-        Exit 4 on unknown/unreadable backups (won't guess): pick an id
-        from `rfg backup` first.
+        `restore --dry-run <id>` only shows what would change (per-file
+        would_change plus sizes, manifest status) and writes nothing.
+        Exit 4 on unknown/unreadable/corrupt backups (won't guess): pick
+        an id from `rfg backup` first.
         """
-        bid = args[0] if args and not args[0].startswith("-") else ""
+        dry = "--dry-run" in (args or []) or bool(getattr(self, "dry", False))
+        bid = next((a for a in (args or []) if not a.startswith("-")), "")
         if not bid:
-            self.emit_err("restore", "usage: rfg restore <id> (see rfg backup)")
+            self.emit_err("restore", "usage: rfg restore [--dry-run] <id> (see rfg backup)")
             return USAGE
+        if dry:
+            try:
+                preview = gitops.diff_roadmap_state(self.root, bid)
+            except OSError as e:
+                self.emit_err("restore", str(e))
+                return UNSUPPORTED
+            self.emit("restore", preview)
+            return OK
         try:
             restored = gitops.restore_roadmap_state(self.root, bid)
         except OSError as e:
@@ -2004,7 +2215,11 @@ class CLI:
             self.emit_err("claim", "no free step")
             return USAGE
         if not same_claim_client(state, agent):
-            self.emit_err("claim", f"conflict: held by {state.claim_agent}")
+            self.emit_err(
+                "claim",
+                f"conflict: held by {state.claim_agent}",
+                claim_held_payload(state),
+            )
             return CONFLICT
         state.claim_step = sid
         if agent:
@@ -2645,6 +2860,9 @@ def parse_args(argv: list[str]):
             i += 1
             continue
         if a == "--root" and i + 1 < len(argv):
+            # QM-05: hard --allow-external-root (exit 4) is deferred until
+            # gotoharness clients send the flag. Until then --root outside
+            # cwd stays allowed; doctor warns. FAIL: Guard lands uncoordinated.
             root = argv[i + 1]
             i += 2
             continue

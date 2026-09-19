@@ -296,6 +296,49 @@ class BackupRestoreTest(unittest.TestCase):
         self.rfg("init")
         self.rfg("restore", code=1)
 
+    def test_restore_dry_run_shows_diff_without_writing(self):
+        Path(self.td, "mod.py").write_text("old\n")
+        subprocess.check_call(["git", "add", "-A"], cwd=self.td, env=self.env, stdout=subprocess.DEVNULL)
+        subprocess.check_call(["git", "commit", "-m", "i"], cwd=self.td, env=self.env, stdout=subprocess.DEVNULL)
+        self.rfg("init")
+        self.rfg(
+            "plan", "--step", "B1", "--engine", "implement", "--path", "mod.py",
+            "--want", "w", "--verify", "test -n ok",
+        )
+        self.rfg("tick", "B1")
+        bid = json.loads(self.rfg("backup", "--format", "json"))["data"]["backups"][-1]
+        live_rm = Path(self.td) / ".rfg" / "roadmap.yaml"
+        live_st = Path(self.td) / ".rfg" / "state.json"
+        live_rm.write_bytes(live_rm.read_bytes() + b"# dry-run probe\n")
+        rm_after, st_after = live_rm.read_bytes(), live_st.read_bytes()
+        out = json.loads(self.rfg("restore", "--dry-run", bid, "--format", "json"))["data"]
+        self.assertTrue(out.get("dry_run"), out)
+        self.assertEqual(out.get("manifest"), "ok", out)
+        diff = {d["file"]: d for d in out.get("diff") or []}
+        self.assertTrue(diff["roadmap.yaml"]["would_change"], out)
+        self.assertFalse(diff["state.json"]["would_change"], out)
+        self.assertEqual(live_rm.read_bytes(), rm_after, "dry-run must not write")
+        self.assertEqual(live_st.read_bytes(), st_after, "dry-run must not write")
+
+    def test_restore_dry_run_corrupt_is_exit_4(self):
+        Path(self.td, "mod.py").write_text("old\n")
+        subprocess.check_call(["git", "add", "-A"], cwd=self.td, env=self.env, stdout=subprocess.DEVNULL)
+        subprocess.check_call(["git", "commit", "-m", "i"], cwd=self.td, env=self.env, stdout=subprocess.DEVNULL)
+        self.rfg("init")
+        self.rfg(
+            "plan", "--step", "B1", "--engine", "implement", "--path", "mod.py",
+            "--want", "w", "--verify", "test -n ok",
+        )
+        self.rfg("tick", "B1")
+        bid = json.loads(self.rfg("backup", "--format", "json"))["data"]["backups"][-1]
+        bdir = Path(self.td) / ".rfg" / "land-backups" / bid
+        (bdir / "state.json").write_text("torn\n", encoding="utf-8")
+        live = {(Path(self.td) / ".rfg" / n).read_bytes() for n in ("roadmap.yaml", "state.json")}
+        self.rfg("restore", "--dry-run", bid, "--format", "json", code=4)
+        self.assertEqual({(Path(self.td) / ".rfg" / n).read_bytes()
+                          for n in ("roadmap.yaml", "state.json")}, live,
+                         "corrupt dry-run must not write")
+
 
 if __name__ == "__main__":
     unittest.main()

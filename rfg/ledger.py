@@ -4,7 +4,9 @@ Buchführung statt Ignorieren (SCOUT-D): verify/test-added events land
 append-only in `.rfg/ledger-events.jsonl` (ignoriert, deriviert). Counter
 (passes/fails) werden ausschließlich aus verify-Events abgeleitet —
 Agent-Input landet nur in `note` und nie in Schwellen. Tombstone/Drop
-ist geparkt (I3). Kanonische tracked Ablage folgt, wenn I3 sie braucht.
+ist geparkt (I3): stale_functions bleiben warn-only (progress.exceptions
++ doctor.ledger_stale) bis ein `test-dropped`/`tombstone`-Event die Map
+bereinigt. Nichts löscht jsonl-Zeilen.
 """
 
 from __future__ import annotations
@@ -122,5 +124,10 @@ def new_test_overlaps(root: str | Path, function: str, test_id: str) -> bool:
 
 
 def stale_functions(root: str | Path) -> list[str]:
-    """Functions with >1 test needing human compare (review trigger)."""
+    """Functions with >1 test needing human compare (review trigger).
+
+    Tombstone design (parked I3): a later test-dropped event would remove
+    a test from map_view so the function leaves this list. Until then
+    stale is warn-only (progress.exceptions, doctor.ledger_stale).
+    """
     return sorted(f for f, tests in map_view(root).items() if len(tests) > 1)

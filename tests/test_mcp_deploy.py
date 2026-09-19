@@ -101,6 +101,83 @@ class McpDeployTest(unittest.TestCase):
             self.assertTrue(bad["result"]["isError"], bad)
             self.assertEqual(bad["result"]["exitCode"], 4, bad)
 
+    def test_backup_id_allowlist(self):
+        # QM-02: allowlist pins fail-stop ids; traversal never restores.
+        from rfg import gitops
+
+        for good in ("20260918T222247-8e47c7e1", "manual-retry", "a.b_c-d", "B01"):
+            self.assertTrue(gitops._valid_backup_id(good), good)
+        for bad in ("", "../x", "/abs", "a/b", ".hidden", "-dash", "sp ace",
+                    "  ", "x" * 201, None, 123):
+            self.assertFalse(gitops._valid_backup_id(bad), repr(bad))
+
+    def test_restore_traversal_is_exit_4(self):
+        # QM-02: ../-restore is refused (OSError -> exit 4), never guessed.
+        import json
+
+        from rfg import gitops, mcp
+
+        with tempfile.TemporaryDirectory(prefix="rfg-mcp-trav-") as td:
+            bad = mcp.handle(
+                {"jsonrpc": "2.0", "id": 6, "method": "tools/call",
+                 "params": {"name": "restore", "arguments": {"id": "../x"}}},
+                td,
+            )
+            self.assertTrue(bad["result"]["isError"], bad)
+            self.assertEqual(bad["result"]["exitCode"], 4, bad)
+            with self.assertRaises(OSError):
+                gitops.restore_roadmap_state(td, "/abs")
+            with self.assertRaises(OSError):
+                gitops.diff_roadmap_state(td, "a/b")
+
+    def test_doctor_names_external_root(self):
+        # QM-02: root outside cwd is named (warn-first, never a gate).
+        from unittest import mock
+
+        from rfg import doctor
+
+        with tempfile.TemporaryDirectory(prefix="rfg-doc-root-") as td:
+            with mock.patch.object(Path, "cwd", return_value=Path("/definitely/elsewhere")):
+                rep = doctor.run(td)
+            root_check = rep["checks"]["root"]
+            self.assertTrue(root_check["ok"], root_check)
+            self.assertIn("outside", root_check["detail"], root_check)
+            with mock.patch.object(Path, "cwd", return_value=Path(td)):
+                rep = doctor.run(td)
+            self.assertIn("cwd", rep["checks"]["root"]["detail"])
+
+    def test_qm05_external_root_guard_deferred(self):
+        # QM-05: hard --allow-external-root waits for gotoharness flag
+        # coordination. FAIL: Guard lands without coordinated flag.
+        import json
+        import subprocess
+        import sys
+
+        from rfg import cli as climod
+        from rfg import mcp
+
+        src_cli = Path(climod.__file__).read_text(encoding="utf-8")
+        src_mcp = Path(mcp.__file__).read_text(encoding="utf-8")
+        for src, label in ((src_cli, "cli"), (src_mcp, "mcp")):
+            self.assertIn("allow-external-root", src, label)
+            self.assertIn("gotoharness", src.lower(), label)
+            self.assertIn("deferred", src.lower(), label)
+
+        with tempfile.TemporaryDirectory(prefix="rfg-qm05-") as td:
+            r = subprocess.run(
+                [sys.executable, str(ROOT / "rfg.py"), "--root", td,
+                 "--format", "json", "version"],
+                cwd=str(ROOT),
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+            body = json.loads(r.stdout)
+            self.assertTrue(body.get("ok"), body)
+            # Uncoordinated hard guard would reject --root outside cwd (exit 4).
+            self.assertNotEqual(r.returncode, 4)
+            self.assertNotIn("allow-external-root", r.stdout)
+
 
 class McpDeploySmokeTest(unittest.TestCase):
     def test_both_launchers_agree_with_canonical(self):

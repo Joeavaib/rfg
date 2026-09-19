@@ -224,6 +224,36 @@ class ImplementLoopTest(unittest.TestCase):
         st = json.loads(self.rfg("status", "--format", "json"))["data"]
         self.assertEqual(next(s for s in st["steps"] if s["id"] == "m1")["status"], "in_progress")
 
+    def test_second_agent_claim_conflicts_with_claimed_by(self):
+        self.rfg("init")
+        self.rfg(
+            "plan",
+            "--step",
+            "m1",
+            "--engine",
+            "implement",
+            "--want",
+            "held",
+            "--path",
+            "a.py",
+            "--verify",
+            "test -f a.py",
+        )
+        alice = self.env.copy()
+        alice["RFG_AGENT"] = "alice"
+        claimed = json.loads(self.rfg("claim", "--format", "json", env=alice))
+        self.assertEqual(claimed["data"]["agent"], "alice")
+        bob = self.env.copy()
+        bob["RFG_AGENT"] = "bob"
+        body = json.loads(self.rfg("claim", "--format", "json", env=bob, code=5))
+        self.assertFalse(body["ok"])
+        self.assertEqual(body.get("claimed_by"), "alice")
+        self.assertEqual(body.get("claim_step"), "m1")
+        self.assertIn("alice", body.get("error", ""))
+        st = json.loads(self.rfg("status", "--format", "json", env=alice))["data"]
+        self.assertEqual(st["claim_step"], "m1")
+        self.assertEqual(st["claim_agent"], "alice")
+
     def test_contract_does_not_inherit_suite_verify(self):
         self.rfg("init")
         self.rfg("plan", "--verify", "pytest")

@@ -38,6 +38,66 @@ class KdScopeTest(unittest.TestCase):
         s3.paths = ["a.py"]
         self.assertEqual(doctor.breadth_warnings([s3]), [])
 
+    def test_qd13_breadth_threshold_boundary(self):
+        # QD-13: BREADTH_THRESHOLD is a named constant; 5 warns, 4 does not.
+        # FAIL: Grenze ungetestet.
+        from rfg import doctor
+        from rfg.types import Step
+
+        self.assertEqual(doctor.BREADTH_THRESHOLD, 5)
+        at = Step(
+            id="QD13-at",
+            title="t",
+            engine="implement",
+            verify="python3 -m pytest tests/test_kd_scope.py -q",
+        )
+        at.paths = [f"f{i}.py" for i in range(doctor.BREADTH_THRESHOLD)]
+        warns_at = doctor.breadth_warnings([at])
+        self.assertTrue(
+            any("QD13-at" in w and "broad" in w.lower() for w in warns_at),
+            warns_at,
+        )
+        below = Step(
+            id="QD13-below",
+            title="t",
+            engine="implement",
+            verify="python3 -m pytest tests/test_kd_scope.py -q",
+        )
+        below.paths = [f"f{i}.py" for i in range(doctor.BREADTH_THRESHOLD - 1)]
+        self.assertEqual(doctor.breadth_warnings([below]), [])
+
+        # Whole-suite heuristic: BARE_SUITE on broad scope extra-warns;
+        # four files stay below the breadth line.
+        suite_at = Step(
+            id="QD13-suite-at",
+            title="t",
+            engine="implement",
+            verify="pytest -q",
+        )
+        suite_at.paths = [f"m{i}.py" for i in range(doctor.BREADTH_THRESHOLD)]
+        sw_at = doctor.oracle_warnings([suite_at])
+        self.assertTrue(any("whole-suite" in w for w in sw_at), sw_at)
+        self.assertTrue(
+            any("broad scope" in w.lower() and "QD13-suite-at" in w for w in sw_at),
+            sw_at,
+        )
+        suite_below = Step(
+            id="QD13-suite-below",
+            title="t",
+            engine="implement",
+            verify="pytest -q",
+        )
+        suite_below.paths = [f"m{i}.py" for i in range(doctor.BREADTH_THRESHOLD - 1)]
+        sw_below = doctor.oracle_warnings([suite_below])
+        self.assertTrue(
+            any("whole-suite" in w and "QD13-suite-below" in w for w in sw_below),
+            sw_below,
+        )
+        self.assertFalse(
+            any("broad scope" in w.lower() and "QD13-suite-below" in w for w in sw_below),
+            sw_below,
+        )
+
     def test_kd2_verify_miss_warns(self):
         from rfg import doctor
         from rfg.types import Step

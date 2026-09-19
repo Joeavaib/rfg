@@ -148,5 +148,98 @@ class WorktreeEnsureTest(_Repo):
         self.assertEqual(Path(self.td, "app.py").read_text(), before)
 
 
+class WorktreeDiagnosisTest(_Repo):
+    """QW-06: heal reason is diagnosed (single source) and surfaced.
+
+    FAIL: foreign/broken worktree heals without naming the reason in
+    progress exceptions and doctor.
+    """
+
+    RFG = [sys.executable, str(ROOT / "rfg.py")]
+
+    def rfg(self, *args):
+        r = subprocess.run(
+            self.RFG + ["--root", self.td, *args],
+            cwd=self.td, env=self.env, capture_output=True, text=True,
+        )
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        return r.stdout
+
+    def _progress_worktree(self):
+        from rfg import progress
+        from rfg.store import Store
+
+        st = Store(self.td)
+        return progress.report(self.td, st.load_roadmap(), st.load_state())
+
+    def _make_foreign(self):
+        from rfg import gitops
+
+        other = tempfile.mkdtemp(prefix="rfg-wt-foreign-")
+        self.addCleanup(shutil.rmtree, other, ignore_errors=True)
+        subprocess.check_call(["git", "init", "-q"], cwd=other, env=self.env)
+        subprocess.check_call(["git", "commit", "--allow-empty", "-qm", "i"],
+                              cwd=other, env=self.env)
+        foreign_wt = Path(gitops.ensure_worktree(other))
+        foreign_gitdir = (foreign_wt / ".git").read_text(encoding="utf-8")
+        wt = Path(gitops.ensure_worktree(self.td))
+        (wt / ".git").write_text(foreign_gitdir)
+        return wt
+
+    def test_usable_needs_no_heal(self):
+        from rfg import gitops
+
+        gitops.ensure_worktree(self.td)
+        diag = gitops.worktree_diagnosis(self.td)
+        self.assertEqual(diag["status"], "usable", diag)
+
+    def test_foreign_names_reason_in_progress_and_doctor(self):
+        from rfg import doctor, gitops
+
+        self.rfg("init")
+        self._make_foreign()
+        diag = gitops.worktree_diagnosis(self.td)
+        self.assertEqual(diag["status"], "foreign-gitdir", diag)
+        rep = self._progress_worktree()
+        kinds = [e for e in rep["exceptions"] if e.get("kind") == "worktree"]
+        self.assertTrue(kinds, rep["exceptions"])
+        self.assertIn("foreign", kinds[0].get("detail", ""), kinds)
+        detail = doctor.run(Path(self.td))["checks"]["worktree"]["detail"]
+        self.assertIn("foreign", detail, detail)
+
+    def test_broken_names_reason_in_progress_and_doctor(self):
+        from rfg import doctor, gitops
+
+        self.rfg("init")
+        wt = Path(gitops.ensure_worktree(self.td))
+        (wt / ".git").write_text("gitdir: /nonexistent/nowhere\n")
+        diag = gitops.worktree_diagnosis(self.td)
+        self.assertEqual(diag["status"], "broken-gitdir", diag)
+        rep = self._progress_worktree()
+        kinds = [e for e in rep["exceptions"] if e.get("kind") == "worktree"]
+        self.assertTrue(kinds, rep["exceptions"])
+        detail = doctor.run(Path(self.td))["checks"]["worktree"]["detail"]
+        self.assertIn("broken", detail, detail)
+
+    def test_missing_expected_warns_but_fresh_init_stays_quiet(self):
+        from rfg import gitops
+
+        self.rfg("init")
+        # fresh init expects no worktree yet: no false positive.
+        rep = self._progress_worktree()
+        self.assertFalse([e for e in rep["exceptions"] if e.get("kind") == "worktree"],
+                         rep["exceptions"])
+        self.rfg("plan", "--step", "w1", "--engine", "implement", "--path", "app.py",
+                 "--want", "w", "--verify", "test -n ok")
+        self.rfg("tick", "w1")
+        wt = Path(gitops.worktree_path(self.td))
+        self.assertTrue(wt.is_dir())
+        shutil.rmtree(wt, ignore_errors=True)
+        self.assertEqual(gitops.worktree_diagnosis(self.td)["status"], "missing")
+        rep = self._progress_worktree()
+        kinds = [e for e in rep["exceptions"] if e.get("kind") == "worktree"]
+        self.assertTrue(kinds, rep["exceptions"])
+
+
 if __name__ == "__main__":
     unittest.main()

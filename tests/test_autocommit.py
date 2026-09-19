@@ -128,17 +128,41 @@ class AutocommitTest(unittest.TestCase):
         self.assertEqual(gitops.commit_all(self.td, "nothing"), "")
 
     def test_never_pushes(self):
+        from unittest import mock
+
+        from rfg import gitops
+
         self._campaign()
+        # Fake-Remote: even with an origin configured, land+commit
+        # must not push anything (behavior, not source grep).
+        bare = str(Path(self.td) / "origin.git")
+        subprocess.check_call(["git", "init", "--bare", "-q", bare], env=self.env)
+        subprocess.check_call(["git", "remote", "add", "origin", bare],
+                              cwd=self.td, env=self.env)
+
+        def ls_remote():
+            return subprocess.run(["git", "ls-remote", "origin"], cwd=self.td,
+                                  env=self.env, capture_output=True, text=True).stdout.strip()
+
+        self.assertEqual(ls_remote(), "")
         env = dict(self.env, RFG_AUTO_COMMIT="1")
         self.rfg("land", "--format", "json", env=env)
-        # no remote configured and none must have been added by the commit path
-        r = subprocess.run(["git", "remote"], cwd=self.td, env=self.env,
-                           capture_output=True, text=True)
-        self.assertEqual(r.stdout.strip(), "")
-        # the commit helper issues no push invocation (quoted arg form)
-        src = (ROOT / "rfg" / "gitops.py").read_text(encoding="utf-8")
-        self.assertNotIn('"push"', src)
-        self.assertNotIn("'push'", src)
+        self.assertEqual(ls_remote(), "",
+                         "land must never push, even with a remote configured")
+        # argv-level: the commit helper itself must never issue push —
+        # this also catches failed attempts, not just completed pushes.
+        Path(self.td, "probe.py").write_text("p = 1\n")
+        seen: list[list[str]] = []
+        real_run = gitops._run
+
+        def rec(d, *args):
+            seen.append(list(args))
+            return real_run(d, *args)
+
+        with mock.patch.object(gitops, "_run", rec):
+            gitops.commit_all(self.td, "probe-no-push")
+        self.assertTrue(seen, seen)
+        self.assertFalse(any("push" in a for a in seen), seen)
 
     def test_maybe_autocommit_off_by_default(self):
         from types import SimpleNamespace

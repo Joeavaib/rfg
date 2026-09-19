@@ -1,7 +1,7 @@
 """XB depth2 warn-only threshold tests (warn-only, no gate change, stdlib-only).
 
 Forward-compatible: before XB-02 the helpers may not exist yet (stub
-branch keeps verify green); after XB-02 the real assertions run.
+branch skips instead of fake-green); after XB-02 the real assertions run.
 Exits never change; exceeding the threshold only warns via payload.
 """
 
@@ -19,8 +19,8 @@ class Depth2WarnTest(unittest.TestCase):
             depth2_warn_threshold = None  # type: ignore
 
         if depth2_warn_threshold is None:
-            # Red-phase stub: spec pinned (default 10), stays green.
-            self.assertEqual(10, 10)
+            # Red-phase: skip statt Tautologie (kein Fake-Gruen ohne Beweis).
+            self.skipTest("depth2-Helper fehlen")
         else:
             # Env parse: default 10, junk -> 10, tunable.
             with mock.patch.dict(os.environ, {}, clear=False):

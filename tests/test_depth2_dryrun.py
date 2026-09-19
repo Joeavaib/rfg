@@ -33,8 +33,43 @@ class Depth2Test(unittest.TestCase):
         a = _step("a", ["a.py"], ["b"])
         b = _step("b", ["a.py"], ["a"])
         got = depth2_ids([a, b], a)
-        self.assertEqual(sorted(got), sorted(set(got)))
+        self.assertEqual(got, sorted(set(got)))
         self.assertNotIn("a", got)
+
+    def test_three_cycle_and_diamond_sorted(self):
+        from rfg.verify import depth2_ids
+
+        a = _step("a", ["a.py"])
+        b = _step("b", ["b.py"], ["a"])
+        c = _step("c", ["c.py"], ["b"])
+        a.depends_on = ["c"]
+        got = depth2_ids([a, b, c], a)
+        self.assertEqual(got, sorted(got))
+        self.assertNotIn("a", got)
+        self.assertEqual(got, ["c"])
+
+        a2 = _step("a", ["a.py"])
+        b2 = _step("b", ["b.py"], ["a"])
+        c2 = _step("c", ["c.py"], ["a"])
+        d2 = _step("d", ["d.py"], ["b", "c"])
+        diamond = depth2_ids([a2, b2, c2, d2], a2)
+        self.assertEqual(diamond, ["d"])
+
+        z = _step("z", ["z.py"], ["b"])
+        m = _step("m", ["m.py"], ["c"])
+        mixed = depth2_ids([a2, b2, c2, z, m], a2)
+        self.assertEqual(mixed, ["m", "z"])
+
+    def test_ghost_deps_logged_not_silent(self):
+        from rfg.verify import depth2_ids
+
+        a = _step("a", ["a.py"])
+        b = _step("b", ["a.py"], ["ghost"])
+        with self.assertLogs("rfg.verify", level="WARNING") as cm:
+            got = depth2_ids([a, b], a)
+        self.assertTrue(any("ghost" in m for m in cm.output), cm.output)
+        self.assertEqual(got, sorted(got))
+        self.assertNotIn("ghost", got)
 
     def test_pure_and_deterministic(self):
         import tempfile

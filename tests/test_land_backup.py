@@ -166,6 +166,107 @@ class LandBackupTest(unittest.TestCase):
         finally:
             sys.path.remove(str(ROOT))
 
+    def test_backup_is_atomic_with_manifest(self):
+        # QW-01: every backup dir is complete (manifest hashes match),
+        # never torn; crash litter (*.tmp-*) is cleaned, never counted.
+        self._loop("python3 -c \"assert 'new' in open('mod.py').read()\"")
+        import hashlib
+
+        baks = Path(self.td) / ".rfg" / "land-backups"
+        (baks / "20200101T000000-deadbeef.tmp-crashlitter").mkdir(parents=True, exist_ok=True)
+        land = json.loads(self.rfg("land", "--format", "json"))
+        self.assertTrue(land["ok"], land)
+        dirs = sorted(p for p in baks.iterdir() if p.is_dir())
+        self.assertTrue(dirs)
+        self.assertFalse([p.name for p in dirs if ".tmp-" in p.name],
+                         "crash litter must be cleaned, never kept")
+        for d in dirs:
+            man = json.loads((d / "manifest.json").read_text(encoding="utf-8"))
+            for name in ("roadmap.yaml", "state.json"):
+                digest = hashlib.sha256((d / name).read_bytes()).hexdigest()
+                self.assertEqual((man.get("files") or {}).get(name), digest,
+                                 f"{d.name}/{name}: torn backup without matching manifest")
+
+    def test_corrupt_backup_restore_refuses(self):
+        # QW-01: a torn backup must refuse (OSError), never half-restore.
+        self._loop("python3 -c \"assert 'new' in open('mod.py').read()\"")
+        land = json.loads(self.rfg("land", "--format", "json"))
+        bak = (land["data"] or {}).get("state_backup") or {}
+        bdir = Path(self.td) / ".rfg" / "land-backups" / bak["dir"]
+        (bdir / "state.json").write_text("torn\n", encoding="utf-8")
+        sys.path.insert(0, str(ROOT))
+        try:
+            from rfg.gitops import restore_roadmap_state
+            with self.assertRaises(OSError):
+                restore_roadmap_state(self.td, bak["dir"])
+        finally:
+            sys.path.remove(str(ROOT))
+
+    def test_backup_idempotent_retry(self):
+        # QW-01: same id twice with identical bytes is idempotent, no error.
+        self._loop("python3 -c \"assert 'new' in open('mod.py').read()\"")
+        sys.path.insert(0, str(ROOT))
+        try:
+            from rfg.gitops import backup_roadmap_state
+            first = backup_roadmap_state(self.td, "manual-retry")
+            second = backup_roadmap_state(self.td, "manual-retry")
+            self.assertEqual(first["dir"], second["dir"])
+            self.assertEqual(first["files"], second["files"])
+            baks = Path(self.td) / ".rfg" / "land-backups"
+            self.assertEqual(len([p for p in baks.iterdir()
+                                  if p.is_dir() and p.name == "manual-retry"]), 1)
+        finally:
+            sys.path.remove(str(ROOT))
+
+    def test_crash_between_apply_and_verify_recovers(self):
+        # QW-03: crash after apply (store lost, worktree kept) recovers
+        # from the apply-time backup; step is back in applied (not
+        # verified), and verify passes afterwards. FAIL: crash window
+        # loses the store without rescue.
+        Path(self.td, "mod.py").write_text("old\n")
+        subprocess.check_call(["git", "add", "-A"], cwd=self.td, env=self.env, stdout=subprocess.DEVNULL)
+        subprocess.check_call(["git", "commit", "-m", "i"], cwd=self.td, env=self.env, stdout=subprocess.DEVNULL)
+        self.rfg("init")
+        self.rfg(
+            "plan", "--step", "C01", "--engine", "implement", "--path", "mod.py",
+            "--verify", "python3 -c \"assert 'new' in open('mod.py').read()\"",
+        )
+        Path(self.td, "mod.py").write_text("new\n")
+        tick = json.loads(self.rfg("tick", "--format", "json"))
+        self.assertEqual(tick["data"]["action"], "stop")
+        applied = json.loads(self.rfg("apply", "--format", "json"))
+        self.assertTrue(applied["ok"], applied)
+        baks = Path(self.td) / ".rfg" / "land-backups"
+        dirs = sorted(p for p in baks.iterdir() if p.is_dir())
+        self.assertTrue(dirs, "apply must leave a backup (crash window rescue)")
+        # crash: store gone (gitignored .rfg loss), worktree kept.
+        (Path(self.td) / ".rfg" / "roadmap.yaml").unlink()
+        (Path(self.td) / ".rfg" / "state.json").unlink()
+        sys.path.insert(0, str(ROOT))
+        try:
+            from rfg.gitops import restore_roadmap_state
+            from rfg.store import Store
+            # name order is only second-granular (same ts sorts by hash):
+            # choose by content — the backup holding the apply.
+            holding = []
+            for d in dirs:
+                try:
+                    snap = json.loads((d / "state.json").read_text(encoding="utf-8"))
+                except (OSError, ValueError):
+                    continue
+                if "C01" in (snap.get("applied") or []):
+                    holding.append(d)
+            self.assertTrue(holding, "no backup holds the apply")
+            restored = restore_roadmap_state(self.td, sorted(holding)[-1].name)
+            self.assertIn("roadmap.yaml", restored.get("files") or [], restored)
+            st = Store(self.td).load_state()
+            self.assertIn("C01", st.applied, "crash must not lose the apply")
+            self.assertNotIn("C01", st.verified, "crash happened before verify")
+        finally:
+            sys.path.remove(str(ROOT))
+        ver = json.loads(self.rfg("verify", "--format", "json"))
+        self.assertTrue(ver["ok"], ver)
+
 
 if __name__ == "__main__":
     unittest.main()

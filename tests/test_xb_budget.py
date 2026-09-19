@@ -36,11 +36,11 @@ class CrossBudgetExtTest(unittest.TestCase):
             cross_budget_note = None  # type: ignore
 
         if not (has_fields and schema_ok and cross_budget_note is not None):
-            # Red-phase stub: defaults (0 = heutiges Verhalten) bleiben gruen.
+            # Red-phase: skip statt Tautologie (kein Fake-Gruen ohne Beweis).
             if has_fields:
                 self.assertEqual(Budget().max_seconds, 0)
                 self.assertEqual(Budget().max_related, 0)
-            self.assertEqual(0, 0)
+            self.skipTest("Budget-Felder/Schema/Helper unvollstaendig")
         else:
             # 0 = disabled = today's behavior.
             self.assertEqual(Budget().max_seconds, 0)
@@ -58,6 +58,11 @@ class CrossBudgetExtTest(unittest.TestCase):
             # Within budget stays silent.
             self.assertEqual(cross_budget_note(3, 0.1, Budget(max_related=10)), "")
             self.assertEqual(cross_budget_note(2, 0.5, Budget(max_seconds=60.0)), "")
+            both = cross_budget_note(12, 5.0, Budget(max_related=10, max_seconds=1.0))
+            self.assertIn("related_total", both)
+            self.assertIn("elapsed", both)
+            self.assertIn("max_seconds", both)
+            self.assertIn("max_related", both)
 
         # --- CLI integration: exit never changes, note only warns ---
         import io
@@ -117,6 +122,25 @@ class CrossBudgetExtTest(unittest.TestCase):
         payload2 = json.loads(buf2.getvalue())["data"]
         self.assertIn("budget_note", payload2, payload2)
         self.assertTrue(payload2["budget_note"], payload2)
+
+        def _over_seconds(self):
+            rm = real_load(self)
+            try:
+                rm.budget.max_seconds = 1e-12
+                rm.budget.max_related = 1
+            except Exception:
+                pass
+            return rm
+
+        with mock.patch.object(_Store, "load_roadmap", _over_seconds):
+            with redirect_stdout(io.StringIO()) as buf3:
+                code3 = c.cmd_verify(["ME"])
+        self.assertEqual(code3, 0, buf3.getvalue())
+        payload3 = json.loads(buf3.getvalue())["data"]
+        self.assertIn("budget_note", payload3, payload3)
+        self.assertIn("max_seconds", payload3["budget_note"], payload3)
+        self.assertIn("max_related", payload3["budget_note"], payload3)
+        self.assertIn("elapsed", payload3["budget_note"], payload3)
 
 
 if __name__ == "__main__":

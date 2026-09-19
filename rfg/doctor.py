@@ -19,11 +19,30 @@ from rfg.verify import is_weak_verify, is_sham_verify
 KNOWN_ENGINES = ("replace", "", "ast-grep", "manual", "implement", "scaffold", "run", "survey")
 
 # KD: warn-first scope breadth rule (no gate, no hard limit, exit 0).
-# Broad path[] = ab 5 Dateien oder ein Dir-Eintrag, der auf mehr als
-# MAX_FILES expandiert. Display kappt, Disk-Dateien bleiben voll,
-# --max-chars 0 = unlimited (K11-Regel), exceptions schrumpfen nie.
+# Broad path[] = ab BREADTH_THRESHOLD Dateien (5 warnt, 4 nicht) oder ein
+# Dir-Eintrag, der auf mehr als MAX_FILES expandiert. Display kappt,
+# Disk-Dateien bleiben voll, --max-chars 0 = unlimited (K11-Regel),
+# exceptions schrumpfen nie.
+#
+# Whole-suite heuristic (oracle_warnings): a BARE_SUITE verify
+# (`pytest`, `pytest -q`, …) on a broad step is extra-smelly (scoped
+# claim, unscoped proof). Warn-first, no gate; survey steps stay exempt.
 BREADTH_THRESHOLD = 5
 SCOPE_HINT = "Scope verkleinern statt Guard biegen"
+
+
+def _verify_covers_dep_path(cmd: str, path: str) -> bool:
+    """True when the verify command names a dependency file (or test_<stem>)."""
+    rel = (path or "").lstrip("./")
+    if not rel or not cmd:
+        return False
+    name = Path(rel).name
+    stem = Path(rel).stem
+    if rel in cmd or name in cmd:
+        return True
+    if stem and (f"test_{stem}" in cmd or f"{stem}_test" in cmd):
+        return True
+    return False
 
 
 def breadth_warnings(
@@ -312,6 +331,38 @@ def oracle_warnings(
                         f"{s.id} verify does not reference any path[] entry ({shown}); "
                         f"scoped elsewhere?; {SCOPE_HINT}"
                     )
+    by_id = {s.id: s for s in all_steps if s.id}
+    for s in all_steps:
+        if (s.engine or "").strip() == "survey":
+            continue
+        cmd = s.verify or ""
+        if not cmd:
+            continue
+        for dep_id in s.depends_on or []:
+            dep = by_id.get(dep_id)
+            if dep is None:
+                continue
+            dpaths = step_paths(dep)
+            shown = dpaths[0] if dpaths else dep_id
+            if dpaths and not any(_verify_covers_dep_path(cmd, p) for p in dpaths):
+                warns.append(
+                    f"{s.id} depends_on {dep_id} but verify does not name dependency "
+                    f"path ({shown}); {SCOPE_HINT}"
+                )
+            if (dep.verify or "").strip() == cmd.strip():
+                warns.append(
+                    f"{s.id} verify identical to predecessor {dep_id} "
+                    f"({cmd.strip()!r}); named {shown}; {SCOPE_HINT}"
+                )
+        paths = step_paths(s)
+        if len(paths) >= BREADTH_THRESHOLD and cmd.strip():
+            covered = [p for p in paths if _verify_covers_dep_path(cmd, p)]
+            if len(covered) <= 2:
+                hint = ", ".join(paths[:2])
+                warns.append(
+                    f"{s.id} verify names {len(covered)} file(s) for {len(paths)} "
+                    f"path[] entries ({hint}); {SCOPE_HINT}"
+                )
     try:
         warns.extend(breadth_warnings(all_steps))
     except Exception:
@@ -455,6 +506,27 @@ def run(root: str | Path) -> dict:
         "module": {"ok": True, "detail": str(Path(rfg_pkg.__file__).resolve())},
         "server": {"ok": True, "detail": f"rfg {__version__} schema {SCHEMA_VERSION}"},
     }
+    # QM-02: external root visibility (warn-first, never a gate). A resolved
+    # root outside the caller cwd means cross-campaign ops — worth naming
+    # so the wrong repo never wins silently (hard guard needs harness flag
+    # coordination and stays out until then).
+    try:
+        here = Path.cwd().resolve()
+        rt = Path(root).resolve()
+        if rt == here:
+            root_note = "ok (root == cwd)"
+        else:
+            try:
+                rt.relative_to(here)
+                root_note = f"root {rt} inside cwd {here}"
+            except ValueError:
+                root_note = (
+                    f"root {rt} outside cwd {here} "
+                    "(cross-campaign op? pass --root explicitly per call)"
+                )
+    except Exception:
+        root_note = "ok"
+    checks["root"] = {"ok": True, "detail": root_note}
     # toolchain alternatives: if planned verify binary is missing, suggest a stdlib fallback
     try:
         tc_notes: list[str] = []
@@ -495,6 +567,14 @@ def run(root: str | Path) -> dict:
         except Exception:
             pass
     checks["oracles"] = {"ok": True, "detail": oracle_warn or "ok"}
+    stale_fns: list[str] = []
+    try:
+        from rfg import ledger as _ledger
+
+        stale_fns = _ledger.stale_functions(root)
+    except Exception:
+        stale_fns = []
+    checks["ledger_stale"] = {"ok": True, "detail": stale_fns or "ok"}
     epic_notes: list[str] = []
     epic_summary = "ok"
     if st.exists() and schema_ok:
@@ -530,15 +610,10 @@ def run(root: str | Path) -> dict:
     checks["cxx_db_hint"] = {"ok": True, "detail": cxx_hint}
     wt_note = "ok"
     try:
-        wt = gitops.worktree_path(root)
-        if wt.exists() and not gitops._gitdir_owned_by_root(wt, root):
-            wt_note = (
-                f".rfg/worktree/.git points outside {root}/.git/worktrees "
-                "(stale absolute gitdir after manual clone); "
-                "ensure_worktree will prune and recreate it"
-            )
+        diag = gitops.worktree_diagnosis(root)
+        wt_note = diag.get("detail") or "ok"
     except Exception:
-        pass
+        wt_note = "ok"
     checks["worktree"] = {"ok": True, "detail": wt_note}
     rec_notes: list[str] = []
     try:

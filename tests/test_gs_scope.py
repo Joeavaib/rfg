@@ -140,6 +140,27 @@ class GsEpicFilterTest(unittest.TestCase):
         self.assertEqual(out["ready"], ["GS9-a"])
         self.assertEqual(out.get("epic"), "GS")
 
+    def test_tick_epic_does_not_silent_ignore(self):
+        out = self.rfg("tick", "--epic", "GS")
+        self.assertEqual(out.get("status"), "in_progress")
+        self.assertEqual(out.get("epic"), "GS")
+        self.assertEqual((out.get("context") or {}).get("id"), "GS9-a")
+        st = self.rfg("status")
+        self.assertEqual(st.get("claim_step"), "GS9-a")
+
+    def test_tick_epic_kd_not_gs_next(self):
+        out = self.rfg("tick", "--epic", "KD")
+        self.assertEqual((out.get("context") or {}).get("id"), "KD9-b")
+        self.assertEqual(out.get("epic"), "KD")
+        self.assertTrue(out.get("warning"))
+        st = self.rfg("status")
+        self.assertEqual(st.get("claim_step"), "KD9-b")
+
+    def test_apply_epic_unknown_warns(self):
+        out = self.rfg("apply", "--epic", "ZZ")
+        self.assertTrue(out.get("warning"))
+        self.assertIn("ZZ", out.get("warning"))
+
     def test_unknown_epic_warns_not_gates(self):
         nxt = self.rfg("next", "--epic", "ZZ")
         self.assertEqual(nxt["ready"], [])
@@ -152,7 +173,12 @@ class GsEpicFilterTest(unittest.TestCase):
     def test_mcp_surface_unchanged(self):
         from rfg.mcp import CORE_TOOLS, SCHEMAS
 
-        self.assertEqual(len(CORE_TOOLS), 16, CORE_TOOLS)
+        # QG-05: Subset statt Freeze — Kern-Verben muessen da sein,
+        # legitime Erweiterungen duerfen die Zahl aendern.
+        for tool in ("init", "plan", "next", "context", "tick", "apply",
+                     "verify", "land", "rollback", "claim", "release",
+                     "progress", "doctor", "recipe", "why", "impact"):
+            self.assertIn(tool, CORE_TOOLS, f"Core-Tool fehlt: {tool}")
         for tool in ("plan", "next", "progress"):
             props = (SCHEMAS.get(tool) or {}).get("properties") or {}
             self.assertNotIn("epic", props, f"MCP {tool} darf kein epic-Param haben")

@@ -19,6 +19,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 RFG = [sys.executable, str(ROOT / "rfg.py")]
 _BARE_TAUTOLOGY = re.compile(r"^\s*(self\.)?assertTrue\(True\)\s*$")
+_BARE_EQUAL_TAUTOLOGY = re.compile(r"^\s*(self\.)?assertEqual\(\s*(\S+?)\s*,\s*\2\s*\)\s*$")
 
 
 class ShamStrictTest(unittest.TestCase):
@@ -28,6 +29,13 @@ class ShamStrictTest(unittest.TestCase):
         self.assertTrue(is_sham_verify('python3 -c "assert True"'))
         self.assertTrue(is_sham_verify("python3 -c \"assertTrue(True)\""))
         self.assertTrue(is_sham_verify("sh -c 'exit 0'"))
+        # QG-02: identical-arg assertEqual is always true (no proof).
+        self.assertTrue(is_sham_verify('python3 -c "self.assertEqual(0, 0)"'))
+        self.assertTrue(is_sham_verify('python3 -c "assertEqual(10,10)"'))
+        self.assertTrue(is_sham_verify('python3 -c "assertEqual(x, x)"'))
+        # Different args stay legitimate (real comparison).
+        self.assertFalse(is_sham_verify('python3 -c "assertEqual(a, b)"'))
+        self.assertFalse(is_sham_verify('python3 -c "assertEqual(result, 0)"'))
         self.assertFalse(is_sham_verify("pytest tests/test_x.py -q"))
         self.assertFalse(is_sham_verify(""))
         self.assertFalse(is_sham_verify('python3 -c "assert True"', engine="survey"))
@@ -50,7 +58,7 @@ class ShamStrictTest(unittest.TestCase):
         hits = []
         for t in sorted((ROOT / "tests").glob("test_*.py")):
             for n, line in enumerate(t.read_text(encoding="utf-8").splitlines(), 1):
-                if _BARE_TAUTOLOGY.match(line):
+                if _BARE_TAUTOLOGY.match(line) or _BARE_EQUAL_TAUTOLOGY.match(line):
                     hits.append(f"{t.name}:{n}")
         self.assertEqual(hits, [], hits)
 

@@ -1,4 +1,9 @@
-"""Minimal MCP stdio server exposing the same operations as the CLI."""
+"""Minimal MCP stdio server exposing the same operations as the CLI.
+
+QM-05: MCP `root` outside cwd is allowed (warn-first). A hard
+`--allow-external-root` guard (exit 4) is deferred until gotoharness
+clients can send that flag; otherwise foreign campaigns break.
+"""
 
 from __future__ import annotations
 
@@ -75,6 +80,7 @@ SCHEMAS = {
             "root": _ROOT,
             "step": _STR,
             "dry_run": _BOOL,
+            "force": _BOOL,
             "agent": _STR,
         },
     },
@@ -162,8 +168,23 @@ def _cli(root: str) -> CLI:
 
 
 def _tool_root(arguments: dict[str, Any], default: str) -> str:
-    r = arguments.get("root") or os.environ.get("RFG_ROOT") or default
-    return str(r)
+    """Repo root precedence (QM-01, single source — no silent drift).
+
+    1. arguments["root"] (explicit per call, wins over everything)
+    2. RFG_ROOT env (server-wide default)
+    3. default (server cwd at serve time)
+    Empty/blank values fall through to the next level (a blank root
+    must never silently become the effective root).
+    """
+    arg = ""
+    if isinstance(arguments, dict):
+        arg = str(arguments.get("root") or "").strip()
+    if arg:
+        return arg
+    env = str(os.environ.get("RFG_ROOT") or "").strip()
+    if env:
+        return env
+    return str(default)
 
 
 def call_tool(name: str, arguments: dict[str, Any], root: str) -> tuple[int, dict]:
@@ -229,6 +250,8 @@ def call_tool(name: str, arguments: dict[str, Any], root: str) -> tuple[int, dic
         c.dry = bool(arguments.get("dry_run"))
         if arguments.get("step"):
             args.append(str(arguments["step"]))
+        if arguments.get("force"):
+            args.append("--force")
         if arguments.get("agent"):
             args.extend(["--agent", str(arguments["agent"])])
         return c.cmd_apply(args), {}
@@ -380,9 +403,23 @@ def handle(msg: dict, root: str) -> dict:
 
         buf = io.StringIO()
         os.environ.setdefault("RFG_AGENT", "agent")
-        with redirect_stdout(buf):
-            code, _ = call_tool(name, arguments, root)
-        text = buf.getvalue()
+        try:
+            with redirect_stdout(buf):
+                code, _ = call_tool(name, arguments, root)
+            text = buf.getvalue()
+        except ValueError as e:
+            msg = str(e)
+            if "traversal" not in msg.lower() and not msg.startswith("unsupported"):
+                raise
+            return {
+                "jsonrpc": "2.0",
+                "id": mid,
+                "result": {
+                    "content": [{"type": "text", "text": msg}],
+                    "isError": True,
+                    "exitCode": 4,
+                },
+            }
         return {
             "jsonrpc": "2.0",
             "id": mid,

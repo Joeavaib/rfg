@@ -81,6 +81,24 @@ class DedupMemoTest(unittest.TestCase):
         self.assertFalse(payload.get("deduped"), payload)
         self.assertTrue((Path(self.td) / ".rfg" / "verify" / "A__cross_C.log").is_file())
 
+    def test_whitespace_collision_and_fail_not_cached(self):
+        spaced = 'python3  -c  "assert True"'
+        c = self._trio(SAME, spaced)
+        code, payload = self._verify_a(c, RFG_DEDUP_MEMO="1")
+        self.assertEqual(code, 0, payload)
+        deduped = payload.get("deduped") or []
+        self.assertTrue(any(d.get("step") == "C" for d in deduped), payload)
+
+        fail = 'python3 -c "assert False"'
+        c2 = self._trio(fail, fail)
+        with mock.patch.dict(os.environ, {"RFG_DEDUP_MEMO": "1"}):
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                code2 = c2.cmd_verify(["A"])
+        self.assertEqual(code2, 2, buf.getvalue())
+        self.assertTrue((Path(self.td) / ".rfg" / "verify" / "A__cross_B.log").is_file())
+        self.assertTrue((Path(self.td) / ".rfg" / "verify" / "A__cross_C.log").is_file())
+
 
 if __name__ == "__main__":
     unittest.main()

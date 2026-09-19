@@ -36,10 +36,10 @@ class DocsDriftHelpTest(unittest.TestCase):
         for verb in CORE_VERBS:
             self.assertIn(verb, cli.HELP, f"HELP missing core verb: {verb}")
 
-    def test_grok_build_covers_core_tools(self):
-        build = (ROOT / "docs" / "GROK-BUILD.md").read_text(encoding="utf-8")
+    def test_agent_md_covers_core_tools(self):
+        build = (ROOT / "docs" / "agent.md").read_text(encoding="utf-8")
         for tool in ("tick", "land", "verify", "doctor", "plan", "apply"):
-            self.assertIn(tool, build, f"GROK-BUILD.md missing: {tool}")
+            self.assertIn(tool, build, f"agent.md missing: {tool}")
 
 
 if __name__ == "__main__":

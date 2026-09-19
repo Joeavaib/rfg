@@ -144,6 +144,47 @@ class ValidateCheckTest(unittest.TestCase):
         kinds = {(f["kind"], f["step"]) for f in out.get("findings") or []}
         self.assertIn(("duplicate-id", "s1"), kinds)
 
+    def test_check_manual_missing_want(self):
+        self.rfg("init")
+        self.rfg(
+            "plan",
+            "--step",
+            "M01",
+            "--engine",
+            "manual",
+            "--path",
+            "a.py",
+            "--verify",
+            "pytest tests/test_a.py -q",
+        )
+        out = json.loads(self.rfg("plan", "--check", "--format", "json", code=5))["data"]
+        kinds = {(f["kind"], f["step"]) for f in out.get("findings") or []}
+        self.assertIn(("missing-want", "M01"), kinds)
+
+    def test_check_m01_m08_shared_testfile(self):
+        self.rfg("init")
+        for i in range(1, 9):
+            self.rfg(
+                "plan",
+                "--step",
+                f"M0{i}",
+                "--engine",
+                "manual",
+                "--want",
+                f"slice {i}",
+                "--path",
+                f"m{i}.py",
+                "--verify",
+                "pytest tests/test_all.py -q",
+            )
+        out = json.loads(self.rfg("plan", "--check", "--format", "json", code=5))["data"]
+        shared = [f for f in out.get("findings") or [] if f["kind"] == "shared-test-file"]
+        self.assertTrue(shared, out)
+        detail = shared[0]["detail"]
+        self.assertIn("test_all.py", detail)
+        self.assertIn("M01", detail)
+        self.assertIn("M08", detail)
+
     def test_mcp_plan_check_flag(self):
         from rfg import mcp
 

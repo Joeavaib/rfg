@@ -51,6 +51,28 @@ class FrictionTest(unittest.TestCase):
         self.assertEqual(nxt["path"], ["backend/app.py", "frontend/app.ts"])
         self.assertNotIn("[", nxt["path"][0])
 
+    def test_path_traversal_exit_4(self):
+        # QD-12: DotDot and absolute paths are unsupported (exit 4).
+        # FAIL: a traversal path is accepted.
+        from rfg.types import coerce_path_list
+
+        for bad in ("../x", "/abs", "foo/../bar"):
+            with self.assertRaises(ValueError) as cm:
+                coerce_path_list(bad)
+            msg = str(cm.exception).lower()
+            self.assertIn("unsupported", msg, bad)
+            self.assertIn("traversal", msg, bad)
+        self.assertEqual(coerce_path_list("a.py"), ["a.py"])
+        self.assertEqual(coerce_path_list("src/a.py"), ["src/a.py"])
+        self.rfg("init")
+        for bad in ("../x", "/abs"):
+            out = self.rfg(
+                "plan", "--step", "S", "--path", bad, "--want", "x",
+                "--format", "json", code=4,
+            )
+            self.assertIn("unsupported", out.lower(), out)
+            self.assertIn("traversal", out.lower(), out)
+
     def test_engine_default(self):
         self.rfg("init")
         self.rfg("plan", "--profile", "feature", "--step", "S", "--path", "app.py", "--want", "ship")
@@ -81,6 +103,28 @@ class FrictionTest(unittest.TestCase):
         )
         applied = json.loads(self.rfg("apply", "--format", "json"))
         self.assertTrue(applied["ok"], applied)
+
+    def test_implement_tracked_dirty_needs_force(self):
+        # QW-05: run executes blindly at root -> tracked-dirty needs
+        # --force (names files); untracked dirt stays free (G03).
+        # FAIL: dirty root silently run.
+        Path(self.td, "app.py").write_text("v1\n")
+        subprocess.check_call(["git", "add", "-A"], cwd=self.td, env=self.env,
+                              stdout=subprocess.DEVNULL)
+        subprocess.check_call(["git", "commit", "-m", "i"], cwd=self.td, env=self.env,
+                              stdout=subprocess.DEVNULL)
+        self.rfg("init")
+        self.rfg(
+            "plan", "--step", "S", "--engine", "run", "--path", "app.py",
+            "--want", "x", "--verify", "test -n ok",
+        )
+        Path(self.td, "app.py").write_text("v2-dirty\n")
+        out = self.rfg("apply", "--format", "json", code=3)
+        self.assertIn("app.py", out, "dirty error must name the file")
+        self.assertIn("--force", out)
+        forced = json.loads(self.rfg("apply", "--force", "--format", "json"))
+        self.assertTrue(forced["ok"], forced)
+        self.assertIn("app.py", (forced["data"] or {}).get("forced_dirty") or [], forced)
 
     def test_verify_guess(self):
         from rfg.detect import default_verify

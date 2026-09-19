@@ -1,10 +1,12 @@
 """Diff presence gate (stdlib-only): every changed function in rfg/ must be
 referenced by at least one test file.
 
-This is honestly a *presence* heuristic, not line coverage (no coverage lib
-vendored on purpose). It pairs with mutation sampling (scripts/mutation_sample.py):
-presence forces the agent to touch changed code in tests, mutation checks the
-tests actually assert.
+This is honestly a *symbol* heuristic, not line coverage (no coverage lib
+vendored on purpose). A test counts as reference only when it really *uses*
+the name (AST: Name load, attribute access, import) — a bare word in a
+comment or string is decoration, not coverage (QG-03). It pairs with
+mutation sampling (scripts/mutation_sample.py): presence forces the agent
+to touch changed code in tests, mutation checks the tests actually assert.
 """
 
 from __future__ import annotations
@@ -79,15 +81,35 @@ def changed_functions(root: str | Path, rev: str = "HEAD") -> dict[str, list[str
 
 
 def test_references(root: str | Path) -> dict[str, set[str]]:
-    """Map test file -> set of words it mentions (cheap textual reference)."""
+    """Map test file -> set of symbol names it really uses (AST).
+
+    Counts Name loads, attribute accesses in load position, and imported
+    names. Bare words in comments/strings never count: mentioning a
+    function in prose does not test it.
+    """
     root = Path(root)
     refs: dict[str, set[str]] = {}
     for t in sorted((root / "tests").glob("test_*.py")):
         try:
-            words = set(re.findall(r"[A-Za-z_][A-Za-z0-9_]*", t.read_text(encoding="utf-8")))
-        except OSError:
+            tree = ast.parse(t.read_text(encoding="utf-8"))
+        except (OSError, SyntaxError, ValueError):
             continue
-        refs[t.name] = words
+        names: set[str] = set()
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Name):
+                if isinstance(node.ctx, ast.Load):
+                    names.add(node.id)
+            elif isinstance(node, ast.Attribute):
+                if isinstance(node.ctx, ast.Load):
+                    names.add(node.attr)
+            elif isinstance(node, ast.Import):
+                for a in node.names:
+                    names.add((a.asname or a.name).split(".")[0])
+            elif isinstance(node, ast.ImportFrom):
+                for a in node.names:
+                    if a.name != "*":
+                        names.add(a.asname or a.name)
+        refs[t.name] = names
     return refs
 
 

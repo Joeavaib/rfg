@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+import logging
 import os
+import re
 import shlex
 import shutil
 import subprocess
 from pathlib import Path
+
+_LOG = logging.getLogger("rfg.verify")
 
 
 def load_env(root: str | Path) -> dict[str, str]:
@@ -114,9 +118,8 @@ def depth2_ids(steps, step) -> list[str]:
 
     Counts what depth 2 *would* warn about: neighbors of neighbors,
     excluding depth-1 and self. Read-only, cycle-safe via visited set,
-    deterministic. Never touches state, never gates — the caller only
-    logs the count. Deciding warn-vs-block from the counts happens
-    after measurement (~20 verifies), not here.
+    sorted (deterministic). Ghost deps are logged, never swallowed.
+    Never touches state, never gates — the caller only logs the count.
     """
     steps = list(steps or [])
     by_id: dict[str, object] = {}
@@ -124,26 +127,38 @@ def depth2_ids(steps, step) -> list[str]:
         sid = getattr(s, "id", "")
         if sid and sid not in by_id:
             by_id[sid] = s
-    me = getattr(step, "id", "")
+    me = getattr(step, "id", "") or ""
+    if not me:
+        _LOG.warning("depth2_ids: missing step id")
+        return []
     try:
         d1 = related_step_ids(steps, step)
-    except Exception:
+    except Exception as exc:
+        _LOG.warning("depth2 related_step_ids failed for %s: %s", me, exc)
         return []
     seen = set(d1) | {me}
     out: list[str] = []
     for rid in d1:
         rs = by_id.get(rid)
         if rs is None:
+            _LOG.warning("depth2 ghost dep %s (from %s)", rid, me)
             continue
+        for dep in getattr(rs, "depends_on", None) or []:
+            if dep and dep not in by_id:
+                _LOG.warning("depth2 ghost dep %s (from %s)", dep, rid)
         try:
             nxt = related_step_ids(steps, rs)
-        except Exception:
+        except Exception as exc:
+            _LOG.warning("depth2 related_step_ids failed for %s: %s", rid, exc)
             continue
         for nid in nxt:
+            if nid not in by_id:
+                _LOG.warning("depth2 ghost dep %s (from %s)", nid, rid)
+                continue
             if nid not in seen:
                 seen.add(nid)
                 out.append(nid)
-    return out
+    return sorted(out)
 
 
 def depth2_warn_threshold() -> int:
@@ -236,11 +251,23 @@ def uncapped_related_step_ids(steps, step) -> list[str]:
 
 
 def related_total_count(steps, step) -> int:
-    """Uncapped related count (warn-only, never gates)."""
+    """Uncapped related count *before* the applied/verified filter (warn-only).
+
+    Cross-verify later skips pending neighbors; this total must still
+    count them so dropping RFG_RELATED_MAX cannot hide as truncated=false.
+    """
     try:
         return len(uncapped_related_step_ids(steps, step))
     except Exception:
         return 0
+
+
+def related_was_truncated(total, emitted_len) -> bool:
+    """True when the emitted related list is shorter than the uncapped total."""
+    try:
+        return int(total) > int(emitted_len)
+    except (TypeError, ValueError):
+        return False
 
 
 def related_step_ids(steps, step) -> list[str]:
@@ -361,6 +388,11 @@ def is_weak_verify(command: str | None, engine: str | None = None) -> bool:
 
 _SHAM_MARKERS = ("assert true", "asserttrue(true)", "exit 0")
 
+# assertEqual(X, X) with identical args is always true (QG-02): comparing a
+# value to itself proves nothing about the code under test. Conservative on
+# purpose — different arg texts (assertEqual(a, b)) never match.
+_TAUTOLOGY_EQUAL = re.compile(r"(?:self\.)?assertequal\(\s*([^,()]+?)\s*,\s*\1\s*\)")
+
 
 def is_sham_verify(command: str | None, engine: str | None = None) -> bool:
     """Tautological verifies prove nothing (V2, strict layer).
@@ -376,4 +408,6 @@ def is_sham_verify(command: str | None, engine: str | None = None) -> bool:
     s = " ".join((command or "").lower().split())
     if not s:
         return False
-    return any(m in s for m in _SHAM_MARKERS)
+    if any(m in s for m in _SHAM_MARKERS):
+        return True
+    return bool(_TAUTOLOGY_EQUAL.search(s))

@@ -81,6 +81,31 @@ class McpParityTest(unittest.TestCase):
                 failures.append(f"{name}: not routed")
         self.assertEqual(failures, [], failures)
 
+    def test_harvest_routes_without_farm_as_exit_4(self):
+        from rfg import mcp
+
+        with mock.patch.dict(os.environ, {"RFG_FARM": "", "RFG_HOME": ""}, clear=False):
+            os.environ.pop("RFG_FARM", None)
+            os.environ.pop("RFG_HOME", None)
+            code, extra = mcp.call_tool("harvest", {}, self.td)
+        self.assertNotEqual(extra, {"error": "unknown tool"})
+        self.assertEqual(code, 4)
+
+    def test_harvest_stat_empty_farm(self):
+        from rfg import mcp
+
+        farm = Path(self.td) / "farm"
+        farm.mkdir()
+        # Minimal harvest.py so _farm_dir accepts this out.
+        (farm / "harvest.py").write_text(
+            "def load_index(out):\n    return []\n"
+            "def harvest(root, out):\n    return {'wrote': 0, 'skipped': 0, 'checkpoints': 0, 'contracts': 0, 'out': str(out)}\n"
+        )
+        with mock.patch.dict(os.environ, {"RFG_FARM": str(farm)}, clear=False):
+            code, extra = mcp.call_tool("harvest_stat", {"out": str(farm)}, self.td)
+        self.assertEqual(extra, {})
+        self.assertEqual(code, 0)
+
     def test_unknown_verb_is_not_routed(self):
         from rfg import mcp
 

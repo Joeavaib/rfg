@@ -36,6 +36,8 @@ CORE_TOOLS = (
     "recipe",
     "why",
     "impact",
+    "harvest",
+    "harvest_stat",
 )
 
 _STR = {"type": "string"}
@@ -124,6 +126,25 @@ SCHEMAS = {
     },
     "why": {"type": "object", "properties": {"root": _ROOT, "step": _STR}},
     "impact": {"type": "object", "properties": {"root": _ROOT, "symbol": _STR, "files": _BOOL}},
+    "harvest": {
+        "type": "object",
+        "properties": {
+            "root": _ROOT,
+            "out": {
+                "type": "string",
+                "description": "Farm directory (else RFG_FARM). External rfg-farm, not .rfg/",
+            },
+        },
+    },
+    "harvest_stat": {
+        "type": "object",
+        "properties": {
+            "out": {
+                "type": "string",
+                "description": "Farm directory (else RFG_FARM)",
+            },
+        },
+    },
 }
 
 TOOLS = [
@@ -158,6 +179,8 @@ TOOLS = [
     {"name": "export", "description": "Write offline batch-changes.yaml or static dashboard.html"},
     {"name": "recipe", "description": "List/show/apply bundled roadmap recipes"},
     {"name": "packs", "description": "List packs; paid enable is unsupported"},
+    {"name": "harvest", "description": "Copy implement packets (want/path[]/diff) into RFG_FARM. External farmer, not rfg store. Pass root= for the campaign repo."},
+    {"name": "harvest_stat", "description": "Counts of harvested packets (with_contract vs diff-only)"},
     {"name": "doctor", "description": "Environment and schema checks. Extra verbs (status, audit, …) need RFG_MCP_ALL=1"},
     {"name": "migrate", "description": "Migrate roadmap schema"},
 ]
@@ -185,6 +208,60 @@ def _tool_root(arguments: dict[str, Any], default: str) -> str:
     if env:
         return env
     return str(default)
+
+
+def _farm_dir(arguments: dict[str, Any] | None = None) -> Path | None:
+    """External packet store. Not .rfg/. RFG_FARM or arguments['out']."""
+    arg = ""
+    if isinstance(arguments, dict):
+        arg = str(arguments.get("out") or "").strip()
+    if arg:
+        return Path(arg)
+    env = str(os.environ.get("RFG_FARM") or "").strip()
+    if env:
+        return Path(env)
+    home = str(os.environ.get("RFG_HOME") or "").strip()
+    if home:
+        sib = Path(home).resolve().parent / "rfg-farm"
+        if (sib / "harvest.py").is_file():
+            return sib
+    return None
+
+
+def _call_farm(action: str, arguments: dict[str, Any], root: str) -> tuple[int, dict]:
+    farm = _farm_dir(arguments)
+    if farm is None or not (farm / "harvest.py").is_file():
+        print(json.dumps({
+            "ok": False,
+            "error": "unsupported: RFG_FARM not set (external harvest, not rfg core)",
+        }))
+        return 4, {}
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("rfg_farm_harvest", farm / "harvest.py")
+    if spec is None or spec.loader is None:
+        print(json.dumps({"ok": False, "error": "unsupported: harvest.py not loadable"}))
+        return 4, {}
+    farm_harvest = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(farm_harvest)
+
+    out = Path(str(arguments.get("out") or farm))
+    if action == "stat":
+        rows = farm_harvest.load_index(out)
+        known = sum(1 for r in rows if r.get("contract_known"))
+        payload = {
+            "ok": True,
+            "packets": len(rows),
+            "with_contract": known,
+            "without_contract": len(rows) - known,
+            "out": str(out),
+        }
+        print(json.dumps(payload))
+        return OK, {}
+    info = farm_harvest.harvest(Path(root), out)
+    info["ok"] = True
+    print(json.dumps(info))
+    return OK, {}
 
 
 def call_tool(name: str, arguments: dict[str, Any], root: str) -> tuple[int, dict]:
@@ -353,6 +430,10 @@ def call_tool(name: str, arguments: dict[str, Any], root: str) -> tuple[int, dic
         return c.cmd_recipe(act), {}
     if name == "packs":
         return c.cmd_packs([]), {}
+    if name == "harvest":
+        return _call_farm("harvest", arguments, root)
+    if name == "harvest_stat":
+        return _call_farm("stat", arguments, root)
     if name == "doctor":
         return c.cmd_doctor([]), {}
     if name == "migrate":

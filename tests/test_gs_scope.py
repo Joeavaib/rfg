@@ -177,7 +177,8 @@ class GsEpicFilterTest(unittest.TestCase):
         # legitime Erweiterungen duerfen die Zahl aendern.
         for tool in ("init", "plan", "next", "context", "tick", "apply",
                      "verify", "land", "rollback", "claim", "release",
-                     "progress", "doctor", "recipe", "why", "impact"):
+                     "progress", "doctor", "recipe", "why", "impact",
+                     "harvest", "harvest_stat"):
             self.assertIn(tool, CORE_TOOLS, f"Core-Tool fehlt: {tool}")
         for tool in ("plan", "next", "progress"):
             props = (SCHEMAS.get(tool) or {}).get("properties") or {}

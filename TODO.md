@@ -89,6 +89,8 @@ Was den Worker umwirft, sobald er kein Frontier ist:
 
 Nicht in rfg (Zusatz bleibt Zusatz): Trace-Farm `/home/joe/Dokumente/prod/rfg-farm`. Harvest nach Verify, vor `init`. `init` ohne Harvest = Contracts weg, nur nackte Diffs (98/103 Packets).
 
+Farm-Runde 1 (2026-09-19, 4 isolierte Clones): MCP-`out` war Packet-Dir, Shim suchte dort `harvest.py` → Exit 4 „RFG_FARM not set“ in Subagents. `out` ≠ Script-Ort. Incremental Harvest speicherte last-step als `after=WORKTREE`, nächster Step erzeugte ein zweites Packet (farm_02: 5 bei 3 Steps). Verify muss ein **Kommando** sein (`python3 -m pytest tests/foo.py -q`), nicht die bloße Testdatei (Exit 126). YAML-Feld ist `paths`, nicht `path`. Git-Identity: Snapshot fällt nicht mehr still auf HEAD; Fallback `rfg@local` + `checkpoint_warning`.
+
 ### Danach / nicht primär
 
 - `cli-split` — `rfg/cli.py` ~3k Zeilen / 38 `cmd_*`. Jeder Slice trifft die Datei; Split ist eigene Kampagne, nicht „nebenbei“.

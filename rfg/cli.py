@@ -1309,6 +1309,7 @@ class CLI:
         if not step:
             self.emit_err("apply", "unknown step " + sid)
             return USAGE
+        checkpoint_warn = ""
         frm0 = step.replace.from_pat if step.replace else ""
         step.engine = default_engine(step.engine, from_pat=frm0)
         if step.engine and step.engine not in ENGINES:
@@ -1385,8 +1386,15 @@ class CLI:
                     state.worktree = target
                     try:
                         snap = gitops.snapshot(wt, "rfg checkpoint before " + sid)
-                    except RuntimeError:
+                        if gitops.snapshot_fallback:
+                            checkpoint_warn = (
+                                "git identity missing; checkpoint committed as rfg@local"
+                            )
+                    except RuntimeError as e:
                         snap = h
+                        checkpoint_warn = (
+                            f"checkpoint snapshot failed ({e}); harvest may see 0 packets"
+                        )
                     cp = Checkpoint(
                         id=f"cp-{sid}-{int(datetime.now(timezone.utc).timestamp())}",
                         step_id=sid,
@@ -1425,8 +1433,15 @@ class CLI:
                         state.worktree = target
                         try:
                             snap = gitops.snapshot(wt, "rfg checkpoint before " + sid)
-                        except RuntimeError:
+                            if gitops.snapshot_fallback:
+                                checkpoint_warn = (
+                                    "git identity missing; checkpoint committed as rfg@local"
+                                )
+                        except RuntimeError as e:
                             snap = h
+                            checkpoint_warn = (
+                                f"checkpoint snapshot failed ({e}); harvest may see 0 packets"
+                            )
                         cp = Checkpoint(
                             id=f"cp-{sid}-{int(datetime.now(timezone.utc).timestamp())}",
                             step_id=sid,
@@ -1503,6 +1518,10 @@ class CLI:
             if step.engine == "replace" and hits == 0:
                 payload["warning"] = f"0 hits in {len(zero_hits)} path(s); check scope"
             _attach_contract_warning(payload, step)
+            if checkpoint_warn:
+                payload["checkpoint_warning"] = checkpoint_warn
+                prev = (payload.get("warning") or "").strip()
+                payload["warning"] = f"{prev}; {checkpoint_warn}" if prev else checkpoint_warn
             if self.show_diff:
                 payload["diff"] = diff
                 self.emit("apply", payload, diff=diff)
@@ -1641,6 +1660,10 @@ class CLI:
             payload["warning"] = extra_hint if not payload.get("warning") else payload["warning"] + "; " + extra_hint
             payload["extra_warning"] = extra_hint
         _attach_contract_warning(payload, step)
+        if checkpoint_warn:
+            payload["checkpoint_warning"] = checkpoint_warn
+            prev = (payload.get("warning") or "").strip()
+            payload["warning"] = f"{prev}; {checkpoint_warn}" if prev else checkpoint_warn
         if step.extras:
             payload["extras"] = list(step.extras)
         if forced_dirty:

@@ -361,3 +361,16 @@ class FrictionTest(unittest.TestCase):
         self.assertFalse(tick_s["data"].get("contract_warning"))
         sblob = (tick_s["data"].get("contract_warning") or "") + (tick_s["data"].get("warning") or "")
         self.assertNotIn("test_x.py", sblob)
+
+    def test_snapshot_identity_fallback(self):
+        from rfg import gitops
+
+        subprocess.check_call(["git", "commit", "-m", "i", "--allow-empty"], cwd=self.td, env=self.env, stdout=subprocess.DEVNULL)
+        subprocess.check_call(["git", "config", "--unset", "user.email"], cwd=self.td, env=self.env)
+        subprocess.check_call(["git", "config", "--unset", "user.name"], cwd=self.td, env=self.env)
+        (Path(self.td) / "x.txt").write_text("x\n")
+        cleared = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+        with unittest.mock.patch.dict(os.environ, cleared, clear=True):
+            sha = gitops.snapshot(self.td, "rfg checkpoint before x")
+        self.assertTrue(sha)
+        self.assertTrue(gitops.snapshot_fallback)

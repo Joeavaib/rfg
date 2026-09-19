@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import re
 import subprocess
 from pathlib import Path
@@ -23,12 +24,13 @@ def _valid_backup_id(backup_id: object) -> bool:
     return _BACKUP_ID_RE.fullmatch(backup_id) is not None
 
 
-def _run(dir: str | Path, *args: str) -> str:
+def _run(dir: str | Path, *args: str, env: dict[str, str] | None = None) -> str:
     r = subprocess.run(
         ["git", *args],
         cwd=dir,
         capture_output=True,
         text=True,
+        env=env,
     )
     if r.returncode != 0:
         msg = (r.stderr or r.stdout or "").strip() or f"exit {r.returncode}"
@@ -269,9 +271,27 @@ def reset_hard(dir: str | Path, commit: str) -> None:
     _run(dir, "reset", "--hard", commit)
 
 
+snapshot_fallback = False
+
+
 def snapshot(dir: str | Path, msg: str) -> str:
+    """Commit worktree state. Missing git identity uses rfg@local (warn via caller)."""
+    global snapshot_fallback
+    snapshot_fallback = False
     _run(dir, "add", "-A")
-    _run(dir, "commit", "-m", msg, "--allow-empty")
+    try:
+        _run(dir, "commit", "-m", msg, "--allow-empty")
+    except RuntimeError as e:
+        err = str(e).lower()
+        if "identit" not in err and "author" not in err and "email" not in err:
+            raise
+        env = os.environ.copy()
+        env.setdefault("GIT_AUTHOR_NAME", "rfg")
+        env.setdefault("GIT_AUTHOR_EMAIL", "rfg@local")
+        env.setdefault("GIT_COMMITTER_NAME", env["GIT_AUTHOR_NAME"])
+        env.setdefault("GIT_COMMITTER_EMAIL", env["GIT_AUTHOR_EMAIL"])
+        _run(dir, "commit", "-m", msg, "--allow-empty", env=env)
+        snapshot_fallback = True
     return head(dir)
 
 

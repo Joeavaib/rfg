@@ -210,8 +210,35 @@ def _tool_root(arguments: dict[str, Any], default: str) -> str:
     return str(default)
 
 
-def _farm_dir(arguments: dict[str, Any] | None = None) -> Path | None:
-    """External packet store. Not .rfg/. RFG_FARM or arguments['out']."""
+def _harvest_py() -> Path | None:
+    """Where harvest.py lives. Never the packet `out` directory.
+
+    Subagents pass out=farm_01 (empty packet dir). That must not be
+    required to contain harvest.py — look at RFG_FARM, RFG_HOME sibling,
+    then the checkout next to this package (works when subagent MCP
+    inherits neither env).
+    """
+    env = str(os.environ.get("RFG_FARM") or "").strip()
+    if env:
+        p = Path(env)
+        if p.is_file() and p.name == "harvest.py":
+            return p
+        cand = p / "harvest.py"
+        if cand.is_file():
+            return cand
+    home = str(os.environ.get("RFG_HOME") or "").strip()
+    if home:
+        cand = Path(home).resolve().parent / "rfg-farm" / "harvest.py"
+        if cand.is_file():
+            return cand
+    here = Path(__file__).resolve().parents[1]  # repo that contains rfg/
+    cand = here.parent / "rfg-farm" / "harvest.py"
+    if cand.is_file():
+        return cand
+    return None
+
+
+def _packet_out(arguments: dict[str, Any] | None, harvest_py: Path) -> Path:
     arg = ""
     if isinstance(arguments, dict):
         arg = str(arguments.get("out") or "").strip()
@@ -219,33 +246,29 @@ def _farm_dir(arguments: dict[str, Any] | None = None) -> Path | None:
         return Path(arg)
     env = str(os.environ.get("RFG_FARM") or "").strip()
     if env:
-        return Path(env)
-    home = str(os.environ.get("RFG_HOME") or "").strip()
-    if home:
-        sib = Path(home).resolve().parent / "rfg-farm"
-        if (sib / "harvest.py").is_file():
-            return sib
-    return None
+        p = Path(env)
+        return p.parent if p.is_file() else p
+    return harvest_py.parent
 
 
 def _call_farm(action: str, arguments: dict[str, Any], root: str) -> tuple[int, dict]:
-    farm = _farm_dir(arguments)
-    if farm is None or not (farm / "harvest.py").is_file():
+    script = _harvest_py()
+    if script is None:
         print(json.dumps({
             "ok": False,
-            "error": "unsupported: RFG_FARM not set (external harvest, not rfg core)",
+            "error": "unsupported: harvest.py not found (set RFG_FARM or keep rfg-farm next to the rfg checkout)",
         }))
         return 4, {}
     import importlib.util
 
-    spec = importlib.util.spec_from_file_location("rfg_farm_harvest", farm / "harvest.py")
+    spec = importlib.util.spec_from_file_location("rfg_farm_harvest", script)
     if spec is None or spec.loader is None:
         print(json.dumps({"ok": False, "error": "unsupported: harvest.py not loadable"}))
         return 4, {}
     farm_harvest = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(farm_harvest)
 
-    out = Path(str(arguments.get("out") or farm))
+    out = _packet_out(arguments, script)
     if action == "stat":
         rows = farm_harvest.load_index(out)
         known = sum(1 for r in rows if r.get("contract_known"))

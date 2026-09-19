@@ -84,12 +84,24 @@ class McpParityTest(unittest.TestCase):
     def test_harvest_routes_without_farm_as_exit_4(self):
         from rfg import mcp
 
-        with mock.patch.dict(os.environ, {"RFG_FARM": "", "RFG_HOME": ""}, clear=False):
-            os.environ.pop("RFG_FARM", None)
-            os.environ.pop("RFG_HOME", None)
+        with mock.patch.object(mcp, "_harvest_py", return_value=None):
             code, extra = mcp.call_tool("harvest", {}, self.td)
         self.assertNotEqual(extra, {"error": "unknown tool"})
         self.assertEqual(code, 4)
+
+    def test_harvest_out_is_packet_dir_not_script(self):
+        # Subagents pass out=farm_01 (no harvest.py). Script comes from
+        # RFG_FARM / sibling; out is only the packet store.
+        from rfg import mcp
+
+        out = Path(self.td) / "farm_01"
+        out.mkdir()
+        self.assertFalse((out / "harvest.py").is_file())
+        code, extra = mcp.call_tool(
+            "harvest", {"out": str(out), "root": self.td}, self.td
+        )
+        self.assertEqual(extra, {})
+        self.assertEqual(code, 0)
 
     def test_harvest_stat_empty_farm(self):
         from rfg import mcp

@@ -83,7 +83,7 @@ These are the expensive questions. Do not rediscover them from `rfg/*.py`.
 - Skill: `.grok/skills/rfg/SKILL.md` (`/rfg`) — slim; this file is the long form.
 - MCP: `.grok/config.toml` → `python3 -m rfg mcp` with `PYTHONPATH` / `RFG_HOME`. Core = CLI campaign: init, plan, next, context, tick, apply, verify, land, rollback, claim, release, progress, doctor, recipe, why, impact.
 - Plugin fallback: `plugin/rfg/mcp-launch.py` or `scripts/rfg-mcp.py`.
-- Hooks: `.grok/hooks/rfg.json` — PreToolUse denies writes outside `step.path` on **replace** steps; Stop blocks if a step is applied but not verified. Trust the folder (`/hooks-trust`).
+- Hooks: `.grok/hooks/rfg.json` — PreToolUse denies Write/StrReplace outside `dag.next_id` `path[]`, not `claim_step` (claiming another step does not unlock writes; `extras` do not unlock Write). `engine=manual` is allow-all; implement is gated. Stop blocks if a step is applied but not verified. Trust the folder (`/hooks-trust`).
 - Plugin bundle: `plugin/rfg/` + `.grok-plugin/marketplace.json`.
 
 Reload MCP with `r` on the MCP tab or a new session.

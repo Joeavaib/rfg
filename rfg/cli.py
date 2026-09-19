@@ -14,7 +14,7 @@ from rfg import progress, recipes, risk, scaffold, security, telemetry
 from rfg.detect import FALLBACK_VERIFY, default_verify
 from rfg.store import Store, claim_held_payload
 from rfg.types import Budget, Checkpoint, Goal, Hypothesis, Oracle, Replace, Roadmap, Step
-from rfg.types import coerce_depends_list, coerce_path_list, default_engine, is_contract, is_implement, is_mechanical, is_stop_engine, step_observation, step_paths, step_want
+from rfg.types import coerce_depends_list, coerce_path_list, default_engine, is_contract, is_implement, is_mechanical, is_stop_engine, step_allowed_paths, step_observation, step_paths, step_want
 from rfg.verify import clip_output, dispatch as run_verify, is_fallback_verify, is_sham_verify, is_trivial, looks_like_missing_binary, write_log as write_verify_log
 
 OK, USAGE, VERIFY_FAIL, DIRTY, UNSUPPORTED, CONFLICT = 0, 1, 2, 3, 4, 5
@@ -285,6 +285,46 @@ def contract_check_findings(steps: list[Step]) -> list[dict]:
             }
         )
     return found
+
+
+def undeclared_verify_test_files(step: Step) -> list[str]:
+    """Verify test files missing from path[]/extras. Survey exempt. Warn-first."""
+    if (step.engine or "").strip() == "survey":
+        return []
+    allowed = [p.replace("\\", "/").lstrip("./") for p in step_allowed_paths(step)]
+    missing: list[str] = []
+    for tf in verify_test_files(step.verify or ""):
+        norm = tf.replace("\\", "/").lstrip("./")
+        name = Path(norm).name
+        declared = False
+        for p in allowed:
+            if p == norm or p.endswith("/" + name) or Path(p).name == name:
+                declared = True
+                break
+        if not declared:
+            missing.append(tf)
+    return missing
+
+
+def contract_warning_for(step: Step) -> str:
+    missing = undeclared_verify_test_files(step)
+    if not missing:
+        return ""
+    shown = ", ".join(missing[:5])
+    return (
+        f"verify test file {shown} not in path[]/extras; "
+        "extend via plan --path or allowlist via plan --extras"
+    )
+
+
+def _attach_contract_warning(payload: dict, step: Step) -> None:
+    cw = contract_warning_for(step)
+    if not cw:
+        return
+    payload["contract_warning"] = cw
+    prev = (payload.get("warning") or "").strip()
+    payload["warning"] = f"{prev}; {cw}" if prev else cw
+
 
 HELP = """rfg — lead a multi-step refactor locally
 
@@ -732,26 +772,25 @@ class CLI:
             st.write_state(state)
             loc = context.where_to_edit(self.root, state, step)
             reason = step.engine or "manual"
-            self.emit(
-                "tick",
-                {
-                    "action": "stop",
-                    "reason": reason,
-                    "status": "in_progress",
-                    "claimed": True,
-                    "want": step_want(step),
-                    "path": step_paths(step),
-                    "extras": list(step.extras or []),
-                    "verify": step.verify or rm.verify,
-                    "worktree": loc["worktree"],
-                    "edit_root": loc["edit_root"],
-                    "after_edit": loc["after_edit"],
-                    "claim_agent": state.claim_agent,
-                    "context": context.tick_view(self.root, rm, state, step),
-                    **({"epic": epic} if epic else {}),
-                    **({"warning": epic_warning} if epic_warning else {}),
-                },
-            )
+            tick_payload = {
+                "action": "stop",
+                "reason": reason,
+                "status": "in_progress",
+                "claimed": True,
+                "want": step_want(step),
+                "path": step_paths(step),
+                "extras": list(step.extras or []),
+                "verify": step.verify or rm.verify,
+                "worktree": loc["worktree"],
+                "edit_root": loc["edit_root"],
+                "after_edit": loc["after_edit"],
+                "claim_agent": state.claim_agent,
+                "context": context.tick_view(self.root, rm, state, step),
+                **({"epic": epic} if epic else {}),
+                **({"warning": epic_warning} if epic_warning else {}),
+            }
+            _attach_contract_warning(tick_payload, step)
+            self.emit("tick", tick_payload)
             self._backup_best_effort()
             return OK
         # scaffold and run apply+verify like replace
@@ -1104,6 +1143,11 @@ class CLI:
         from rfg.doctor import unknown_engine_warnings as _unknown_eng
 
         warns = list(warns) + _unknown_eng(rm.steps)
+        cw_focus = step if have else dag.step_by_id(rm, dag.next_id(rm, state) or "")
+        if cw_focus is not None:
+            cw = contract_warning_for(cw_focus)
+            if cw and cw not in warns:
+                warns.append(cw)
         # M1: plan surfaces the same toolchain hints as doctor (not doctor-only).
         from rfg.doctor import toolchain_notes_for as _tc_notes
 
@@ -1458,6 +1502,7 @@ class CLI:
                 payload["risk"] = rs
             if step.engine == "replace" and hits == 0:
                 payload["warning"] = f"0 hits in {len(zero_hits)} path(s); check scope"
+            _attach_contract_warning(payload, step)
             if self.show_diff:
                 payload["diff"] = diff
                 self.emit("apply", payload, diff=diff)
@@ -1595,6 +1640,7 @@ class CLI:
             )
             payload["warning"] = extra_hint if not payload.get("warning") else payload["warning"] + "; " + extra_hint
             payload["extra_warning"] = extra_hint
+        _attach_contract_warning(payload, step)
         if step.extras:
             payload["extras"] = list(step.extras)
         if forced_dirty:

@@ -1,3 +1,11 @@
+# Historical (2024) — not current
+
+**Current product is `README.md` (and `docs/agent.md`).** rfg is a local campaign leader: Goal → DAG → worktree → oracle → land. It is **not** tree-sitter, live SCIP, live LSP, or typed rename. Those were a 2024 sketch. Doctrine T4: `lsp.py` is `which`-presence; `impact` is string counts. Do not plan from this file.
+
+The text below is an archive of that sketch. It is **not current**.
+
+---
+
 Kurze ehrliche Antwort: **Das Gesamtpaket gibt es so nicht.** Einzelteile schon – und die sind nicht klein.
 
 ## Was es schon gibt
@@ -25,9 +33,9 @@ Deshalb lohnt bauen. Nicht weil „Refactoring niemand macht“, sondern weil **
 
 ---
 
-# Plan: `rfg` (Arbeitstitel)
+# Plan: `rfg` (Arbeitstitel) — historical sketch, not current v1
 
-Ziel v1: Ein nützliches lokales CLI, mit dem ein Mensch oder Agent ein großes Refactor **führen** kann, ohne alles auf einmal anzufassen.
+Ziel v1 (2024, **not current**): Ein nützliches lokales CLI, mit dem ein Mensch oder Agent ein großes Refactor **führen** kann, ohne alles auf einmal anzufassen. Shipped truth: `README.md`.
 
 ## Prinzipien
 

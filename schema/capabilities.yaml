@@ -1,4 +1,7 @@
 # Language capability flags. Unsupported is better than wrong.
+# Honesty: index_semantic/rename are false everywhere. lsp.py is which-presence
+# (doctrine T4), not live rust-analyzer/clangd. replace is identifier rewrite.
+# SCIP is dump-import, not a live indexer. This file is not loaded at runtime.
 languages:
   typescript:
     discover: true
@@ -21,14 +24,14 @@ languages:
   rust:
     discover: true
     index_syntax: true
-    index_semantic: rust-analyzer  # only if on PATH
+    index_semantic: false
     apply_replace: true
     rename: false
     macros: unsupported
   cpp:
     discover: true
     index_syntax: true
-    index_semantic: clangd  # requires compile_commands.json
+    index_semantic: false
     apply_replace: false     # without compile-db: search only
-    rename: compile_commands.json
+    rename: false
     apply_without_compile_db: false

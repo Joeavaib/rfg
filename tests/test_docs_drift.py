@@ -28,6 +28,24 @@ class DocsDriftTest(unittest.TestCase):
         for term in ("Land-Gate", "Cross-Verify"):
             self.assertIn(term, readme, f"README missing boundary term: {term}")
 
+    def test_plan_md_first_screen_is_historical(self):
+        # CF-03: cold agents must not read plan.md as current v1.
+        # FAIL: first screen still promises tree-sitter / live LSP / SCIP rename.
+        head = "\n".join((ROOT / "plan.md").read_text(encoding="utf-8").splitlines()[:40])
+        low = head.lower()
+        self.assertIn("readme.md", low)
+        self.assertTrue("historical" in low or "not current" in low or "nicht aktuell" in low, head)
+        self.assertNotIn("ziel v1: ein nützliches", low)
+
+    def test_capabilities_yaml_is_honest(self):
+        # FAIL: rename: compile_commands.json or live index_semantic tool names.
+        text = (ROOT / "schema" / "capabilities.yaml").read_text(encoding="utf-8")
+        self.assertNotIn("rename: compile_commands.json", text)
+        self.assertNotIn("index_semantic: rust-analyzer", text)
+        self.assertNotIn("index_semantic: clangd", text)
+        self.assertIn("index_semantic: false", text)
+        self.assertIn("rename: false", text)
+
 
 class DocsDriftHelpTest(unittest.TestCase):
     def test_help_covers_core_verbs(self):

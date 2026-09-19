@@ -44,6 +44,28 @@ class SkillFocusTest(unittest.TestCase):
         skill = (ROOT / ".grok" / "skills" / "rfg" / "SKILL.md")
         self.assertLess(len(skill.read_bytes()), 1800)
 
+    def test_plugin_and_grok_share_loop_markers(self):
+        # CF-04: two budgets, shared loop markers, plugin points at canonical.
+        # FAIL: plugin lacks MCP/RFG_ROOT/land/pointer, or plugin >=800, or
+        # grok loses test-focus / Hub-Alignment or grows >=1800.
+        grok = (ROOT / ".grok" / "skills" / "rfg" / "SKILL.md").read_text(encoding="utf-8")
+        plugin = (ROOT / "plugin" / "rfg" / "skills" / "rfg" / "SKILL.md").read_text(encoding="utf-8")
+        for text in (grok, plugin):
+            self.assertIn("MCP", text)
+            self.assertIn("RFG_ROOT", text)
+            self.assertIn("land", text)
+        self.assertIn("test-focus", grok)
+        self.assertIn("Hub", grok)
+        self.assertIn("Alignment", grok)
+        self.assertIn("Genug =", grok)
+        self.assertTrue(
+            "test-focus" in plugin or "docs/agent.md" in plugin,
+            plugin,
+        )
+        self.assertIn(".grok/skills/rfg/SKILL.md", plugin)
+        self.assertLess(len(plugin.encode()), 800)
+        self.assertLess(len(grok.encode()), 1800)
+
 
 if __name__ == "__main__":
     unittest.main()

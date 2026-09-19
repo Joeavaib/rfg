@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
-"""PreToolUse: deny writes outside the current rfg step.path (replace engine only)."""
+"""PreToolUse: deny writes outside dag.next_id path[] (not claim_step).
+
+Gated engines include implement/replace/scaffold/run/survey. engine=manual
+is allow-all. extras do not unlock Write/StrReplace. Do not rebind to
+claim_step (campaign hook-claim-bind).
+"""
 from __future__ import annotations
 
 import json
@@ -65,7 +70,11 @@ def main() -> int:
         json.dumps(
             {
                 "decision": "deny",
-                "reason": f"rfg step {step.id} only allows {sorted(paths)}; use rfg tick/context or engine manual",
+                "reason": (
+                    f"rfg step {step.id} (dag.next_id, not claim_step) only allows "
+                    f"{sorted(paths)}; extras do not unlock Write; "
+                    "use rfg tick/context or engine manual"
+                ),
             }
         )
     )

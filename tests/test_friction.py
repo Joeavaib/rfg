@@ -276,3 +276,88 @@ class FrictionTest(unittest.TestCase):
         self.assertLessEqual(len(prog.get("ready") or []), 8)
         self.assertNotIn("verify_logs", prog)
         self.assertGreaterEqual(len(prog.get("ready") or []), 1)
+
+    def test_apply_verify_test_extra_named(self):
+        # CF-02: undeclared verify test file is named on tick/apply (exit 0).
+        # FAIL: no warning mentioning test_x.py; plan --check becomes a gate;
+        # extras allowlist still warns; survey warns.
+        subprocess.check_call(
+            ["git", "commit", "-m", "i", "--allow-empty"],
+            cwd=self.td,
+            env=self.env,
+            stdout=subprocess.DEVNULL,
+        )
+        self.rfg("init")
+        Path(self.td, "app.py").write_text("x = 1\n")
+        Path(self.td, "tests").mkdir()
+        Path(self.td, "tests", "test_x.py").write_text("def test_ok():\n    assert True\n")
+        self.rfg(
+            "plan",
+            "--step",
+            "S",
+            "--engine",
+            "implement",
+            "--path",
+            "app.py",
+            "--want",
+            "x",
+            "--verify",
+            "python3 -m pytest tests/test_x.py -q",
+        )
+        chk = json.loads(self.rfg("plan", "--check", "--format", "json"))
+        self.assertTrue(chk["data"].get("ok"), chk)
+        tick = json.loads(self.rfg("tick", "--format", "json"))
+        self.assertTrue(tick["ok"], tick)
+        tblob = (tick["data"].get("contract_warning") or "") + " " + (tick["data"].get("warning") or "")
+        self.assertIn("test_x.py", tblob)
+        self.assertIn("plan --path", tblob)
+        self.assertIn("plan --extras", tblob)
+        dry = json.loads(self.rfg("apply", "--dry-run", "--format", "json"))
+        self.assertTrue(dry["ok"], dry)
+        dblob = (dry["data"].get("contract_warning") or "") + " " + (dry["data"].get("warning") or "")
+        self.assertIn("test_x.py", dblob)
+        applied = json.loads(self.rfg("apply", "--format", "json"))
+        self.assertTrue(applied["ok"], applied)
+        ablob = (applied["data"].get("contract_warning") or "") + " " + (applied["data"].get("warning") or "")
+        self.assertIn("test_x.py", ablob)
+        self.assertTrue(applied["data"].get("contract_warning"))
+
+        self.rfg("verify")
+        self.rfg(
+            "plan",
+            "--step",
+            "E",
+            "--engine",
+            "implement",
+            "--path",
+            "app.py",
+            "--extras",
+            "tests/test_x.py",
+            "--want",
+            "x",
+            "--verify",
+            "python3 -m pytest tests/test_x.py -q",
+        )
+        tick_e = json.loads(self.rfg("tick", "--format", "json"))
+        self.assertTrue(tick_e["ok"], tick_e)
+        self.assertFalse(tick_e["data"].get("contract_warning"))
+        eblob = (tick_e["data"].get("contract_warning") or "") + (tick_e["data"].get("warning") or "")
+        self.assertNotIn("test_x.py", eblob)
+
+        self.rfg("release")
+        self.rfg(
+            "plan",
+            "--step",
+            "map",
+            "--engine",
+            "survey",
+            "--want",
+            "map",
+            "--verify",
+            "python3 -m pytest tests/test_x.py -q",
+        )
+        tick_s = json.loads(self.rfg("tick", "--format", "json"))
+        self.assertTrue(tick_s["ok"], tick_s)
+        self.assertFalse(tick_s["data"].get("contract_warning"))
+        sblob = (tick_s["data"].get("contract_warning") or "") + (tick_s["data"].get("warning") or "")
+        self.assertNotIn("test_x.py", sblob)

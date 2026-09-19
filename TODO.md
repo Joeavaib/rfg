@@ -39,15 +39,17 @@ Früher fragil, jetzt Pins:
 Große Scopes gehen nur klein geschnitten: Goal + Acceptance als Gate; DAG mit 1 ID / 1 `want` / schmalem `path[]` / genau 1 echtem Verify; Engine pro Slice; Isolation + Recovery. Voll-Rewrite ≈ 30–50 Modul/Verb-Slices + schrumpfende Parity-Boundary.
 Klein bleiben: ehrliche Boundary; 1–3 Steps für Fix/Heal/Spike/Survey; bei Exit 4 Scope verkleinern statt Guard biegen.
 
-## Contract vs Cross-Verify (offen, gelernt 2026-09-19)
+## Contract vs Cross-Verify (teilweise, Kampagne CF 2026-09-19)
 
-Want + FAIL-Satz + `path[]` + ein Verify reicht zum Fremd-Implementieren. Reibung sitzt um die Vorgabe:
+Want + FAIL-Satz + `path[]` + ein Verify reicht zum Fremd-Implementieren. Reibung sitzt um die Vorgabe.
 
-- Verify-Testdatei nicht in `path[]`, oder Cross-Nachbar teilt `path[]` ohne die neue Semantik → apply Extra-Warnung, Cross-Verify rot.
-- PreToolUse-Hook gated auf `dag.next_id`, nicht `claim_step` (Claim schaltet Writes nicht frei).
-- `apply` staged den ganzen Dirty-Tree; Extra-Warnungen werden Rauschen.
+Erledigt in `55478b7` (`current-loop-friction`):
+- CF-02: `contract_warning` auf tick/apply/`--dry-run` (Exit 0), wenn Verify-Testdatei nicht in `path[]`/`extras`. `plan --check` bleibt kein Gate. Survey/Extras schweigen.
+- CF-03: `plan.md` erste Seite Historical → README; `capabilities.yaml` überall `index_semantic`/`rename: false`.
+- CF-04: Plugin zeigt auf Canonical-Skill; Budgets bleiben.
+- CF-05: Hook/`agent.md` **nennen** `dag.next_id` vs `claim_step`. Verhalten unverändert.
 
-Maßstab: verhindert falsche Applies / spart einen Roundtrip. Pin-Idee (warn-first, kein Gate): Step, dessen Verify-Testdatei nicht in `path[]`/`extras` liegt, oder dessen angewandter path-overlap-Nachbar die neue Semantik nicht kennt, warnt **bevor** apply Extra verschluckt. Hook an Claim binden oder den Mismatch benennen.
+Offen (primärer Weg, siehe unten): Hook an Claim binden; Apply staged weiter den Dirty-Tree (Warnung ≠ Isolation).
 
 ## Inventar 2026-09-19 (Techdebt + Feature-Stand)
 
@@ -74,22 +76,33 @@ Was **da ist, aber dünn** (Ehrlichkeitsschicht, keine Semantik):
 
 C++-Boundary (ehrlich): covered init/plan/next/context/tick/apply/verify-basic/land-basic/progress/claim/rollback (+ help nennt status/doctor). **Python-only:** Land-Gate, Cross-Verify, Budgets, scan/SARIF, fleet, perf-delta, recipe/MCP/why/impact/backup. C++ `cmd_claim` überschreibt still (Apply prüft Holder; Python-Claim ist QM-04). Keine scaffold/run-Parität.
 
-**Techdebt, das sich lohnt** (Maßstab: Reads / falsche Applies / Roundtrip):
+**Techdebt, das sich lohnt** — Rang nach der CF-Land-Runde, vor Trace-Farm-Feedback (2026-09-19 Abend). Kleine Modelle treffen zuerst die **Schleifen-Reibung**, nicht fehlende Semantik.
 
-1. Contract vs Cross-Verify + Hook=`next_id` + apply staged dirty tree — schon offen oben.
-2. `rfg/cli.py` ~2944 Zeilen / 38 `cmd_*` — God-Module; nächster Slice muss oft `cli.py` + Nachbar + Test anfassen.
-3. `plan.md` und `schema/capabilities.yaml` versprechen SCIP/LSP/Rename; README und Doctrine (T4) sagen das Gegenteil. Cold-Agent liest plan.md → falscher Scope.
-4. Dogfood-Roadmap: `doctor` oracles ~154 Warnungen (shared verify, depends ohne path, breadth) auf der gelandeten 186-Step-Kampagne. Warn-first, aber Rauschen; kein Gate.
-5. Skill-Duplikat: `plugin/rfg/skills/rfg/SKILL.md` ≠ `.grok/skills/rfg/SKILL.md`.
-6. QM-05 `--allow-external-root` hard-guard bewusst deferred (gotoharness).
-7. Ledger `stale_functions` Tombstones geparkt (warn-only, I3).
-8. `examples/cxx` Submodule bleibt oft dirty nach Land — nicht Teil des Python-Lands.
+### Primärer Weg (nächste Kampagne, nicht neue Fläche)
 
-**Kein Debt** (bewusst nicht): Live-LSP/clangd/tree-sitter, semantisches Rename, LLM in rfg, parallele Claims, SaaS/Paid-Packs, Game-Engine-Typen, Dirty-Apply für `replace`.
+Was den Worker umwirft, sobald er kein Frontier ist:
 
-Kampagne `current-loop-friction` (2026-09-19, Backup `20260919T013647-1fbe2857`): 5/5 verified, `next` null. Noch nicht gelandet.
+1. **Hook vs Claim** (`hook-claim-bind`) — PreToolUse immer noch `dag.next_id`, nicht `claim_step`. CF-05 hat es nur benannt. Falsche Datei / Shell-Bypass. Maßstab: verhindert falsche Writes.
+2. **Apply staged den Dirty-Tree** — `contract_warning` (CF-02) warnt; Isolation fehlt. Land zog `docs/GROK-BUILD.md` extra mit. Warn-first: Extra nicht als Patch zählen (Farm filtert `path[]`; rfg staged trotzdem).
+3. **Land-Gate vs Verify-Timeout** — `cmd_land` nutzt fest 60s, ignoriert `RFG_VERIFY_TIMEOUT`; nacktes `pytest` (init-Default) ohne `PYTHONPATH` sammelt nicht / läuft in Timeout. Land der CF-Kampagne ging erst, nachdem `rm.verify` auf die Acceptance gesetzt war. Pin: Land-Gate wie `cmd_verify` (Timeout-Env + `load_env`). Kein neues Gate, gleiche Semantik.
+4. **`next` ≠ `recommend`** — Recommend = critical path / shortest verify-string. Farmer-Agent suchte `complexity` (existiert nicht, Schema `additionalProperties: false`). Doku/Skill eine Zeile: nimm `next.id`, nicht Recommend, nicht ein Complexity-Feld.
 
-Später (eigene Kampagnen, nicht diese): `hook-claim-bind`, `cli-split`, `oracle-noise-cap`, `cxx-claim-holder`, `qm05-external-root`, `ledger-tombstones`.
+Nicht in rfg (Zusatz bleibt Zusatz): Trace-Farm `/home/joe/Dokumente/prod/rfg-farm`. Harvest nach Verify, vor `init`. `init` ohne Harvest = Contracts weg, nur nackte Diffs (98/103 Packets).
+
+### Danach / nicht primär
+
+- `cli-split` — `rfg/cli.py` ~3k Zeilen / 38 `cmd_*`. Jeder Slice trifft die Datei; Split ist eigene Kampagne, nicht „nebenbei“.
+- `oracle-noise-cap` — 154 Doctor-Warnungen auf der 186er-Dogfood-Roadmap. Warn-first, kein Gate; Rauschen für Menschen, nicht für Verify.
+- `cxx-claim-holder` — C++ `cmd_claim` überschreibt still; Python-Claim ist QM-04. Nur wenn cxx-Worker real sind.
+- QM-05 `--allow-external-root` deferred (gotoharness).
+- Ledger-Tombstones (I3, warn-only).
+- `examples/cxx` dirty nach Land — Submodule, nicht Python-Land.
+
+Erledigt in CF (nicht mehr offen): plan.md/capabilities-Lüge (CF-03), Skill-Pointer (CF-04), Contract-Warnung Testdatei (CF-02), Hook benannt (CF-05). Land: `55478b7`.
+
+**Kein Debt** (bewusst nicht): Live-LSP/clangd/tree-sitter, semantisches Rename, LLM in rfg, parallele Claims, SaaS, Complexity-Feld, Traces im Kern, Game-Engine-Typen, Dirty-Apply für `replace`.
+
+Spätere Kampagnen-IDs: `hook-claim-bind`, `apply-path-isolation` (warn-first), `land-gate-timeout`, `next-vs-recommend-doc`. Nicht: `complexity`, nicht Farmer in `rfg/*.py`.
 
 ## Bewusst später / nicht in rfg
 

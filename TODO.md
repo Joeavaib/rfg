@@ -93,18 +93,37 @@ Farm-Runde 1 (2026-09-19, 4 isolierte Clones): MCP-`out` war Packet-Dir, Shim su
 
 ### Danach / nicht primär
 
-- `cli-split` — `rfg/cli.py` ~3k Zeilen / 38 `cmd_*`. Jeder Slice trifft die Datei; Split ist eigene Kampagne, nicht „nebenbei“.
 - `oracle-noise-cap` — 154 Doctor-Warnungen auf der 186er-Dogfood-Roadmap. Warn-first, kein Gate; Rauschen für Menschen, nicht für Verify.
 - `cxx-claim-holder` — C++ `cmd_claim` überschreibt still; Python-Claim ist QM-04. Nur wenn cxx-Worker real sind.
 - QM-05 `--allow-external-root` deferred (gotoharness).
 - Ledger-Tombstones (I3, warn-only).
 - `examples/cxx` dirty nach Land — Submodule, nicht Python-Land.
 
+### Später: Innenmodell-Rework (`inner-loop`, dann `cli-split`)
+
+Jetzt nicht bauen — der Checker läuft. Pin 2026-09-19: rfg ist als **Steuerung** gebaut (Verben, Exit-Codes, Env, Git als Transaktion), nicht als Anwendung mit einem Innenmodell. Modularer Bau ist Best Practice, kein Geschmack: ein Lauf, Adapter drumherum. Ohne das lernt jeder neue Slice denselben Drift (Land-Gate ≠ Verify, Hook ≠ Claim, `next` ≠ `recommend`, Harvest-`out` ≠ Script-Ort).
+
+**Halten** (nicht weg-refactoren): Prüfer statt Fabrik, kein LLM in rfg, FAIL-Satz, Stdlib-only, Warn-first, Harvest außen, Exit 4 statt raten.
+
+**Ziel, wenn die Kampagne kommt:** ein Step-Lauf (claim → snapshot → verify → land) in einem Modul; CLI / MCP / Hook nur dispatchen; eine Config statt verstreuter `RFG_*`; neue Fläche = Funktion im Innenmodell, nicht neues `cmd_*` in `cli.py`. `cli-split` erst **nach** diesem Innenmodell — Split ohne gemeinsamen Lauf verdoppelt nur die Leitungen.
+
+Die vier Loop-Friction-IDs sind **Slice 1** dieses Reworks, keine eigene Produktfläche: dieselben Pfade zusammenlegen, Verhalten unverändert.
+
+**Ab jetzt, auch ohne Kampagne** (so wird die Manier gelernt):
+
+1. Verify-Lauf nicht ein drittes Mal in einem neuen Verb kopieren — Land und Verify teilen denselben Runner.
+2. Kein neues `RFG_*`, das nicht durch denselben Config-Leser geht.
+3. Step-Identität: Claim ist der Lock; `next.id` ist nur Ausgabe; Hook folgt dem Claim, sobald `hook-claim-bind` da ist — bis dahin nichts Neues an `next_id` koppeln.
+4. Kein neues MCP-Verb ohne dieselbe Funktion hinter `call_tool` (kein zweiter Pfad).
+5. Oberfläche ohne Kern nicht erweitern (`impact`/`lsp`/`scip` bleiben dünn; kein neues Honesty-Verb).
+
+Kampagne erst wenn Joe sie startet. Kein Big-Bang, kein `cli.py`-Split nebenbei.
+
 Erledigt in CF (nicht mehr offen): plan.md/capabilities-Lüge (CF-03), Skill-Pointer (CF-04), Contract-Warnung Testdatei (CF-02), Hook benannt (CF-05). Land: `55478b7`.
 
 **Kein Debt** (bewusst nicht): Live-LSP/clangd/tree-sitter, semantisches Rename, LLM in rfg, parallele Claims, SaaS, Complexity-Feld, Traces im Kern, Game-Engine-Typen, Dirty-Apply für `replace`.
 
-Spätere Kampagnen-IDs: `hook-claim-bind`, `apply-path-isolation` (warn-first), `land-gate-timeout`, `next-vs-recommend-doc`. Nicht: `complexity`, nicht Farmer in `rfg/*.py`.
+Spätere Kampagnen-IDs: `hook-claim-bind`, `apply-path-isolation` (warn-first), `land-gate-timeout`, `next-vs-recommend-doc` (Slice 1). Danach `inner-loop`, dann `cli-split`. Nicht: `complexity`, nicht Farmer in `rfg/*.py`.
 
 ## Bewusst später / nicht in rfg
 

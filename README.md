@@ -263,6 +263,13 @@ stdio transport, no auth. `1.0.0` means schema 3, not “done”.
 Where your tests are thin, rfg guarantees “step + affected green”, not
 correctness. Warn-first on scope; exit 4 instead of inventing a compiler.
 
+**The tree is not modular.** CLI, MCP, and hooks each wire the same campaign
+loop (claim → snapshot → verify → land) instead of one inner run with
+adapters. That is known debt, not a secret: `inner-loop` first, then
+`cli-split`. Until that campaign starts, keep the checker as-is — do not
+split `cli.py` first, do not copy the verify runner into a new verb, do
+not add a second `RFG_*` reader. See `TODO.md` and `CONTRIBUTING.md`.
+
 ---
 
 ## Store layout

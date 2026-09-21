@@ -16,6 +16,7 @@ examples/cxx/cxx_check
 
 # Dogfood clones (not product source)
 examples/foreign/
+examples/cxx/
 
 # Editor / OS
 .DS_Store

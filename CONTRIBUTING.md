@@ -31,3 +31,15 @@ Python-only includes Land-Gate, Cross-Verify, `--max-chars`, `scan --parse`.
 There is no SLA. Issues that ask for Autopilot, `complexity:` fields, or live
 LSP/SCIP rename (`rename: false` in `schema/capabilities.yaml`) are out of
 scope.
+
+## Inner loop (not now)
+
+The package is a **control plane** (verbs, exit codes, env, git as
+transaction), not an app with one inner model. Wiring the same path twice
+is how loop drift happens (Land-Gate ≠ Verify, hook ≠ claim, `next` ≠
+`recommend`).
+
+When that campaign starts: one step run in one module; CLI / MCP / hook
+only dispatch; one config reader; then `cli-split`. Until it is opened,
+do not split `cli.py` as a drive-by and do not grow a second copy of
+verify. The checker stays running as-is.

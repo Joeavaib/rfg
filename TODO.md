@@ -87,7 +87,7 @@ Was den Worker umwirft, sobald er kein Frontier ist:
 3. **Land-Gate vs Verify-Timeout** — `cmd_land` nutzt fest 60s, ignoriert `RFG_VERIFY_TIMEOUT`; nacktes `pytest` (init-Default) ohne `PYTHONPATH` sammelt nicht / läuft in Timeout. Land der CF-Kampagne ging erst, nachdem `rm.verify` auf die Acceptance gesetzt war. Pin: Land-Gate wie `cmd_verify` (Timeout-Env + `load_env`). Kein neues Gate, gleiche Semantik.
 4. **`next` ≠ `recommend`** — Recommend = critical path / shortest verify-string. Farmer-Agent suchte `complexity` (existiert nicht, Schema `additionalProperties: false`). Doku/Skill eine Zeile: nimm `next.id`, nicht Recommend, nicht ein Complexity-Feld.
 
-Nicht in rfg (Zusatz bleibt Zusatz): Trace-Farm `/home/joe/Dokumente/prod/rfg-farm`. Harvest nach Verify, vor `init`. `init` ohne Harvest = Contracts weg, nur nackte Diffs (98/103 Packets).
+Nicht in rfg (Zusatz bleibt Zusatz): Trace-Farm is a sibling checkout (`RFG_FARM` / `rfg-farm` next to rfg). Harvest nach Verify, vor `init`. `init` ohne Harvest = Contracts weg, nur nackte Diffs.
 
 Farm-Runde 1 (2026-09-19, 4 isolierte Clones): MCP-`out` war Packet-Dir, Shim suchte dort `harvest.py` → Exit 4 „RFG_FARM not set“ in Subagents. `out` ≠ Script-Ort. Incremental Harvest speicherte last-step als `after=WORKTREE`, nächster Step erzeugte ein zweites Packet (farm_02: 5 bei 3 Steps). Verify muss ein **Kommando** sein (`python3 -m pytest tests/foo.py -q`), nicht die bloße Testdatei (Exit 126). YAML-Feld ist `paths`, nicht `path`. Git-Identity: Snapshot fällt nicht mehr still auf HEAD; Fallback `rfg@local` + `checkpoint_warning`.
 

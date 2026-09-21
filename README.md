@@ -210,6 +210,16 @@ Notable:
 
 The local CLI **is** the software. MCP and Skill are doors into it.
 
+Host glue (Grok Build), not the checker core:
+
+| Path | Why it is here |
+|------|----------------|
+| `rfg/` + `rfg.py` | the product |
+| `.grok/` | project MCP + canonical skill + write-guard hooks |
+| `plugin/rfg/` | installable plugin; skill is a pointer to `.grok/skills/rfg/SKILL.md` |
+| `.grok-plugin/` | marketplace stub |
+| `.github/workflows/` | unittest + doctor |
+
 | | CLI | MCP (core) | Skill `/rfg` |
 |--|-----|------------|--------------|
 | Lead a campaign | full | same loop | describes *how* |

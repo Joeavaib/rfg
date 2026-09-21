@@ -278,7 +278,7 @@ loop (claim → snapshot → verify → land) instead of one inner run with
 adapters. That is known debt, not a secret: `inner-loop` first, then
 `cli-split`. Until that campaign starts, keep the checker as-is — do not
 split `cli.py` first, do not copy the verify runner into a new verb, do
-not add a second `RFG_*` reader. See `TODO.md` and `CONTRIBUTING.md`.
+not add a second `RFG_*` reader. See `TODO.md` (adoption first, inner-loop later) and `CONTRIBUTING.md`.
 
 ---
 
@@ -301,12 +301,9 @@ not add a second `RFG_*` reader. See `TODO.md` and `CONTRIBUTING.md`.
 
 ## Development
 
-```bash
-python3 -m pytest tests/ -q
-python3 scripts/diff_coverage.py     # Diff-Presence-Gate: changed rfg/ functions must be test-referenced
-python3 scripts/mutation_sample.py   # Mutations-Stichprobe
-python3 scripts/cxx-parity.py        # python vs cxx/rfg + boundary
-```
+The published tree is enough to **run** rfg. Tests, fixtures, and campaign
+notes live in the maintainer checkout (gitignored). `CONTRIBUTING.md` if
+you have them.
 
-See `CONTRIBUTING.md`. More: `docs/factory-line.md` · `docs/GLOSSARY.md` ·
-`docs/agent.md` · `docs/INTEGRATION.md` · `docs/rfg-coverage-roadmap.md`.
+Agents: `docs/agent.md`. Doctrine: `docs/factory-line.md`. Integration:
+`docs/INTEGRATION.md`.

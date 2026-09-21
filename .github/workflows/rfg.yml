@@ -10,22 +10,12 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: tests
-        run: PYTHONPATH=. python3 -m unittest discover -s tests -q
-      - name: license-check
-        run: python3 scripts/license-check.py
+      - name: rfg help
+        run: python3 rfg.py --help
       - name: rfg doctor
         run: python3 rfg.py doctor --format json
       - name: rfg status
         run: python3 rfg.py status --format json
         continue-on-error: true
-      - name: h1 handoff next
-        run: python3 rfg.py --root testdata/h1-handoff --format json next
-      - name: h1 handoff status
-        run: python3 rfg.py --root testdata/h1-handoff --format json status
-      - name: h3 progress
-        run: python3 rfg.py --root testdata/h1-handoff --format json progress
-      - name: h3 digest
-        run: python3 rfg.py --root testdata/h1-handoff --format json digest
-      - name: h7 recipes
+      - name: recipes
         run: python3 rfg.py recipe list --format json

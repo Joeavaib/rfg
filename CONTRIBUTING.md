@@ -15,6 +15,9 @@ cloud, or an LLM wrapper will be declined.
 
 ## How to work
 
+The GitHub tree omits tests and dogfood docs (gitignored, still on disk
+in a full checkout). If you have them:
+
 ```bash
 python3 -m pytest tests/ -q
 python3 scripts/diff_coverage.py

@@ -18,6 +18,21 @@ examples/cxx/cxx_check
 examples/foreign/
 examples/cxx/
 
+# Maintainer / campaign tree — not required to run rfg
+tests/
+testdata/
+plan.md
+justfile
+docs/GLOSSARY.md
+docs/GROK-BUILD.md
+docs/rfg-coverage-roadmap.md
+docs/scope-scaling.md
+scripts/cxx-parity.py
+scripts/diff_coverage.py
+scripts/mutation_sample.py
+scripts/license-check.py
+scripts/release.sh
+
 # Editor / OS
 .DS_Store
 *~

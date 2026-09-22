@@ -1,0 +1,128 @@
+name: rfg isolated stress
+
+on:
+  push:
+    branches:
+      - stress/rfg-20260922
+
+permissions:
+  contents: read
+
+jobs:
+  stress:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: isolated campaign stress test
+        shell: bash
+        run: |
+          set -euxo pipefail
+          T="$(mktemp -d)"
+          export T
+          cd "$T"
+          git init
+          git config user.name "rfg stress"
+          git config user.email "stress@example.invalid"
+
+          cat > app.py <<'PY'
+          def greet(name):
+              return f"hello {name}"
+          PY
+
+          cat > test_app.py <<'PY'
+          from app import greet
+          assert greet("rfg") == "hello rfg"
+          PY
+
+          git add app.py test_app.py
+          git commit -m base
+
+          cp "$GITHUB_WORKSPACE/rfg.py" .
+          cp -r "$GITHUB_WORKSPACE/rfg" .
+          cp -r "$GITHUB_WORKSPACE/schema" .
+
+          python3 rfg.py doctor --format json
+          python3 rfg.py init --format json
+
+          python3 rfg.py plan --goal "exercise an isolated two-step campaign" --profile feature --format json
+          python3 rfg.py plan --step S01 --title "change greeting" --want "greet returns the new greeting" --path app.py --verify "python3 test_app.py" --engine implement --format json
+          python3 rfg.py plan --step S02 --title "second change" --want "second step remains independently verifiable" --path app.py --verify "python3 test_app.py" --depends S01 --engine implement --format json
+          python3 rfg.py plan --check --strict --format json
+
+          python3 - <<'PY'
+          import json, subprocess
+          def run(*args, expect=0):
+              p = subprocess.run(args, text=True, capture_output=True)
+              print(p.stdout)
+              print(p.stderr)
+              assert p.returncode == expect, (args, p.returncode, p.stdout, p.stderr)
+              return json.loads(p.stdout)
+
+          n = run("python3", "rfg.py", "next", "--format", "json")
+          assert n["data"]["step"] == "S01"
+
+          c = run("python3", "rfg.py", "context", "--format", "json", "--max-chars", "1200")
+          assert "want" in c["data"] and "path" in c["data"]
+
+          t = run("python3", "rfg.py", "tick", "--format", "json")
+          assert t["data"]["status"] == "in_progress"
+          PY
+
+          cat > app.py <<'PY'
+          def greet(name):
+              return f"hello {name} from specialist"
+          PY
+
+          python3 - <<'PY'
+          import json, subprocess
+          def run(*args, expect=0):
+              p = subprocess.run(args, text=True, capture_output=True)
+              print(p.stdout)
+              print(p.stderr)
+              assert p.returncode == expect, (args, p.returncode, p.stdout, p.stderr)
+              return json.loads(p.stdout)
+
+          a = run("python3", "rfg.py", "apply", "S01", "--format", "json")
+          assert a["data"]["step"] == "S01"
+          v = run("python3", "rfg.py", "verify", "S01", "--format", "json")
+          assert v["data"]["ok"] is True
+
+          p = run("python3", "rfg.py", "progress", "--format", "json")
+          assert p["data"]["counts"]["verified"] == 1
+          PY
+
+          python3 rfg.py tick S02 --format json
+
+          cat > app.py <<'PY'
+          def greet(name):
+              return "broken"
+          PY
+
+          python3 - <<'PY'
+          import json, subprocess
+          def run(*args, expect=0):
+              p = subprocess.run(args, text=True, capture_output=True)
+              print(p.stdout)
+              print(p.stderr)
+              assert p.returncode == expect, (args, p.returncode, p.stdout, p.stderr)
+              return json.loads(p.stdout)
+
+          run("python3", "rfg.py", "apply", "S02", "--format", "json")
+          failed = run("python3", "rfg.py", "verify", "S02", "--format", "json", expect=2)
+          assert failed["ok"] is False
+
+          rb = run("python3", "rfg.py", "rollback", "--format", "json")
+          assert rb["ok"] is True or rb["data"].get("step") == "S02"
+
+          # Claim conflict must be explicit and machine-readable.
+          run("python3", "rfg.py", "release", "--format", "json")
+          run("python3", "rfg.py", "claim", "S02", "--agent", "agent-a", "--format", "json")
+          conflict = run("python3", "rfg.py", "claim", "S02", "--agent", "agent-b", "--format", "json", expect=5)
+          assert conflict["ok"] is False
+          PY
+
+          python3 rfg.py release --format json
+          python3 rfg.py plan --check --strict --format json

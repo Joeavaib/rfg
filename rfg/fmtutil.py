@@ -13,11 +13,16 @@ TOOLS = {
     ".ts": ["prettier", "--write"],
     ".tsx": ["prettier", "--write"],
     ".js": ["prettier", "--write"],
+    ".jsx": ["prettier", "--write"],
+    ".mts": ["prettier", "--write"],
+    ".cts": ["prettier", "--write"],
     ".cc": ["clang-format", "-i"],
     ".cpp": ["clang-format", "-i"],
     ".cxx": ["clang-format", "-i"],
     ".h": ["clang-format", "-i"],
+    ".hh": ["clang-format", "-i"],
     ".hpp": ["clang-format", "-i"],
+    ".c": ["clang-format", "-i"],
 }
 
 

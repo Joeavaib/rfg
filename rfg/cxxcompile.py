@@ -19,7 +19,7 @@ def compiler() -> str:
 
 
 def load_db(root: Path) -> list[dict]:
-    for cand in (root / "compile_commands.json", root / "build" / "compile_commands.json"):
+    for cand in (root / "compile_commands.json", root / "build" / "compile_commands.json", root / "cxx" / "compile_commands.json"):
         if cand.is_file():
             try:
                 data = json.loads(cand.read_text(encoding="utf-8"))

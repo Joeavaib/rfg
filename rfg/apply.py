@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
+from rfg.index import LANG_EXTS
 from rfg.types import Step
 
-EXTS = {".go", ".ts", ".tsx", ".js", ".jsx", ".mod", ".py", ".rs", ".cc", ".cpp", ".cxx", ".h", ".hpp", ".c"}
+# Single-source: alle indexierten Exts sind ersetzbar. .mod ist
+# apply-only (go.mod-Nachbar), kein index-EXT – bewusste Ausnahme.
+EXTS = set().union(*LANG_EXTS.values()) | {".mod"}
 SKIP = {".git", ".rfg", "node_modules", "__pycache__", ".venv", "target", "build"}
 SKIP_REASONS = ("string_literal", "comment", "unsupported")
 
@@ -29,8 +33,22 @@ def _skip_spans(src: str, suffix: str) -> list[tuple[str, int, int]]:
     i = 0
     spans: list[tuple[str, int, int]] = []
     py = suffix == ".py"
-    ticks = suffix in {".go", ".ts", ".tsx", ".js", ".jsx"}
+    ticks = suffix in {".go", ".ts", ".tsx", ".js", ".jsx", ".mts", ".cts"}
+    cxx = suffix in {".cc", ".cpp", ".cxx", ".h", ".hh", ".hpp", ".c"}
+    include_re = re.compile(r"#\s*include\s*<[^>\n]*>")
     while i < n:
+        if cxx and src[i] == "#":
+            eol = src.find("\n", i)
+            if eol < 0:
+                eol = n
+            line = src[i:eol]
+            m = include_re.match(line)
+            if m:
+                a = i + m.group(0).find("<")
+                b = i + m.group(0).find(">") + 1
+                spans.append(("string_literal", a, b))
+                i += 1
+                continue
         if src.startswith("/*", i):
             j = src.find("*/", i + 2)
             j = n if j < 0 else j + 2

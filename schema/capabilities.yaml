@@ -25,7 +25,8 @@ languages:
     discover: true
     index_syntax: true
     index_semantic: false
-    apply_replace: true
+    apply_replace: true      # no macros: macro files are exit 4 (see cli guard), use manual/implement
+    apply_with_macros: false
     rename: false
     macros: unsupported
   cpp:

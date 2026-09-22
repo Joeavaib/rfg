@@ -25,11 +25,15 @@ IMPORT_RE = {
     "go": re.compile(r'^\s*import\s+(?:\(|")', re.M),
     "typescript": re.compile(r"^\s*import\s+", re.M),
     "python": re.compile(r"^\s*(?:import|from)\s+", re.M),
+    "rust": re.compile(r"^\s*(?:use\s+|mod\s+)", re.M),
+    "cpp": re.compile(r"^\s*#\s*include\s+", re.M),
 }
 EXPORT_RE = {
     "go": re.compile(r"^func\s+[A-Z]\w*|^type\s+[A-Z]\w*|^var\s+[A-Z]\w*", re.M),
     "typescript": re.compile(r"^\s*export\s+", re.M),
     "python": re.compile(r"^\s*(?:class|def)\s+\w+", re.M),
+    "rust": re.compile(r"^\s*pub\s+(?:fn|struct|enum|mod|type|trait|const|static)", re.M),
+    "cpp": re.compile(r"^\s*(?:export\s+|class\s+\w+|struct\s+\w+)", re.M),
 }
 
 

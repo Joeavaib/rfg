@@ -23,7 +23,7 @@ def looks_like_macro_use(pattern: str) -> bool:
 
 
 def cpp_paths(paths: list[str]) -> bool:
-    cpp_ext = {".cc", ".cpp", ".cxx", ".h", ".hh", ".hpp"}
+    cpp_ext = {".cc", ".cpp", ".cxx", ".h", ".hh", ".hpp", ".c"}
     return any(Path(p).suffix.lower() in cpp_ext for p in paths)
 
 

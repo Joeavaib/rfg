@@ -35,6 +35,7 @@ def _skip_spans(src: str, suffix: str) -> list[tuple[str, int, int]]:
     py = suffix == ".py"
     ticks = suffix in {".go", ".ts", ".tsx", ".js", ".jsx", ".mts", ".cts"}
     cxx = suffix in {".cc", ".cpp", ".cxx", ".h", ".hh", ".hpp", ".c"}
+    rs = suffix == ".rs"
     include_re = re.compile(r"#\s*include\s*<[^>\n]*>")
     while i < n:
         if cxx and src[i] == "#":
@@ -74,6 +75,43 @@ def _skip_spans(src: str, suffix: str) -> list[tuple[str, int, int]]:
             spans.append(("string_literal", i, j))
             i = j
             continue
+        if rs and src[i] == "r" and i + 1 < n and src[i + 1] in "\"#":
+            prev = src[i - 1] if i else ""
+            if not _ident_char(prev):
+                k = i + 1
+                while k < n and src[k] == "#":
+                    k += 1
+                if k < n and src[k] == '"':
+                    hashes = k - (i + 1)
+                    close = '"' + "#" * hashes
+                    j = src.find(close, k + 1)
+                    j = n if j < 0 else j + len(close)
+                    spans.append(("string_literal", i, j))
+                    i = j
+                    continue
+        if rs and src[i] == "'":
+            k = i + 1
+            while k < n and (src[k].isalnum() or src[k] == "_"):
+                k += 1
+            run = src[i + 1 : k]
+            if run and not (len(run) == 1 and k < n and src[k] == "'"):
+                spans.append(("string_literal", i, k))
+                i = k
+                continue
+        if cxx and src.startswith('R"', i):
+            prev = src[i - 1] if i else ""
+            if not _ident_char(prev):
+                d = i + 2
+                while d < n and src[d] not in " ()\\\n\t":
+                    d += 1
+                if d < n and src[d] == "(":
+                    delim = src[i + 2 : d]
+                    close = ")" + delim + '"'
+                    j = src.find(close, d + 1)
+                    j = n if j < 0 else j + len(close)
+                    spans.append(("string_literal", i, j))
+                    i = j
+                    continue
         if src[i] in "\"'":
             q = src[i]
             j = i + 1

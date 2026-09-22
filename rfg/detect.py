@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import shlex
 import shutil
 from pathlib import Path
@@ -30,6 +31,20 @@ def _cd(dirs: list[str], inner: str) -> str:
     return " && ".join(f"(cd {shlex.quote(d)} && {inner})" for d in dirs)
 
 
+def _has_npm_test_script(pkg: str | Path) -> bool:
+    """True only if package.json declares a non-empty scripts.test.
+
+    `npm test` without a test script errors out, so promising it
+    is dishonest. Unparseable package.json counts as missing.
+    """
+    try:
+        data = json.loads(Path(pkg).read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return False
+    scripts = (data or {}).get("scripts") or {}
+    return bool(str(scripts.get("test") or "").strip())
+
+
 def default_verify(root: str | Path) -> str:
     root = Path(root)
     if (root / "go.mod").is_file():
@@ -51,7 +66,10 @@ def default_verify(root: str | Path) -> str:
     if (root / "Makefile").is_file():
         return "make"
     if (root / "package.json").is_file():
-        return "npm test"
+        if _has_npm_test_script(root / "package.json"):
+            return "npm test"
+        # no test script: fall through to nested search instead of
+        # promising a command that errors out
     if (root / "compile_commands.json").is_file() or (root / "CMakeLists.txt").is_file():
         return "make"
     go = _nested_dirs(root, "go.mod")
@@ -71,7 +89,8 @@ def default_verify(root: str | Path) -> str:
     js = [
         rel
         for rel in _nested_dirs(root, "package.json")
-        if (root / rel / "tests").is_dir() or (root / rel / "test").is_dir()
+        if ((root / rel / "tests").is_dir() or (root / rel / "test").is_dir())
+        and _has_npm_test_script(root / rel / "package.json")
     ]
     if js:
         return _cd(js, "npm test")

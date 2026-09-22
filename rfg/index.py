@@ -148,10 +148,33 @@ def _symbols_python(text: str) -> list[str]:
     return names
 
 
+DEF_RE = {
+    "go": [
+        re.compile(r"(?m)^func\s+(?:\([^)]*\)\s*)?(\w+)"),
+        re.compile(r"(?m)^type\s+(\w+)"),
+    ],
+    "typescript": [
+        re.compile(r"(?m)^\s*(?:export\s+)?(?:function|class|interface|enum)\s+(\w+)"),
+        re.compile(r"(?m)^\s*export\s+type\s+(\w+)"),
+    ],
+    "rust": [
+        re.compile(r"(?m)^\s*(?:pub(?:\([^)]*\))?\s+)?fn\s+(\w+)"),
+        re.compile(r"(?m)^\s*(?:pub(?:\([^)]*\))?\s+)?(?:struct|enum|trait|mod|type)\s+(\w+)"),
+    ],
+    "cpp": [
+        re.compile(r"(?m)^\s*(?:class|struct)\s+(\w+)"),
+        re.compile(r"(?m)^\s*(?:[\w:<>*&]+\s+)+(\w+)\s*\("),
+    ],
+}
+
+
 def _symbols_generic(text: str, lang: str) -> list[str]:
     if lang == "python":
         return _symbols_python(text)
-    found = []
+    found: list[str] = []
+    for rx in DEF_RE.get(lang) or []:
+        for m in rx.finditer(text):
+            found.append(m.group(1))
     for m in re.finditer(r"\b([A-Z][A-Za-z0-9_]+)\b", text):
         found.append(m.group(1))
     return list(dict.fromkeys(found))

@@ -342,9 +342,10 @@ Global output flags:
                      capped payloads say truncated
 
 Commands:
-  init                 create .rfg/roadmap.yaml and state
-  status               show roadmap DAG and next free step
-  plan                 write or update steps / hypothesis (--from-impact stamps path)
+   init                 create .rfg/roadmap.yaml and state
+   status [--resume]    show roadmap DAG and next free step (--resume = 1-call session resume)
+   resume               1-call session resume (goal, counts, last/next, git, drift, checkpoint)
+   plan                 write or update steps / hypothesis (--from-impact stamps path)
   next                 print the next free step (includes claim/budget)
   apply [--dry-run] [--diff] [--show-risk]  apply next (or given) step in a git worktree
   context [step]       step contract + snippets for existing paths
@@ -540,12 +541,14 @@ class CLI:
         self.emit("init", payload)
         return OK
 
-    def cmd_status(self) -> int:
+    def cmd_status(self, args: list[str] | None = None) -> int:
         try:
             _, rm, state = self.load()
         except FileNotFoundError as e:
             self.emit_err("status", str(e))
             return USAGE
+        if args and "--resume" in list(args):
+            return self.cmd_resume()
         s = dag.compute(rm, state)
         if gitops.is_repo(self.root):
             s["dirty"] = progress.apply_dirty(self.root, rm, state)
@@ -565,6 +568,18 @@ class CLI:
         s["applies_used"] = state.applies_used
         s["budget"] = {"max_applies": rm.budget.max_applies}
         self.emit("status", s)
+        return OK
+
+    def cmd_resume(self) -> int:
+        """One-call session resume (RES-A): goal, counts, last/next, git, drift, checkpoint."""
+        try:
+            _, rm, state = self.load()
+        except FileNotFoundError as e:
+            self.emit_err("resume", str(e))
+            return USAGE
+        from rfg import resume as _resume
+
+        self.emit("resume", _resume.report(self.root, rm, state))
         return OK
 
     def _step_json(self, rm, state, step: Step | None, blocked: str) -> dict:
@@ -1725,6 +1740,7 @@ class CLI:
                 state.claim_agent = ""
             st.write_state(state)
             self.emit("verify", {"step": sid, "command": cmd, "output": "survey", "log": log_path, "engine": "survey"})
+            self._write_last_stand_best_effort()
             return OK
         if not cmd and not is_contract(step.engine):
             for o in rm.oracles:
@@ -1982,6 +1998,7 @@ class CLI:
             payload["budget_note"] = _bn
         self.emit("verify", payload)
         self._backup_best_effort()
+        self._write_last_stand_best_effort()
         return OK
 
     def _maybe_autocommit(self, rm, state, args: list[str]) -> dict:
@@ -2003,7 +2020,15 @@ class CLI:
                 return {"commit_skipped": "not a git repository"}
             total = len(rm.steps)
             done = len(state.verified)
-            msg = f"rfg land: {rm.goal.statement} ({done}/{total} verified)"
+            last_sid = list(state.verified)[-1] if state.verified else ""
+            last_title = ""
+            if last_sid:
+                _ls = dag.step_by_id(rm, last_sid)
+                last_title = (_ls.title if _ls else "") or ""
+            if last_sid:
+                msg = f"rfg land: {last_sid} {last_title} (RFG-verifiziert) — {rm.goal.statement} ({done}/{total} verified)".strip()
+            else:
+                msg = f"rfg land: {rm.goal.statement} ({done}/{total} verified)"
             sha = gitops.commit_all(self.root, msg)
         except Exception as e:
             return {"commit_warning": f"auto-commit failed ({e}); land itself succeeded"}
@@ -2033,6 +2058,20 @@ class CLI:
         try:
             gitops.backup_roadmap_state(self.root)
         except OSError:
+            pass
+
+    def _write_last_stand_best_effort(self) -> None:
+        """Best-effort `.rfg/last-stand.md` handoff (RES-B).
+
+        Called after successful verify/land with the fresh store state.
+        Never raises, never changes payloads or exits: a missing handoff
+        must not break the loop (generat, sonst verrottet es).
+        """
+        try:
+            from rfg import resume as _resume
+
+            _resume.write_last_stand(self.root)
+        except Exception:
             pass
 
     def cmd_land(self, args: list[str]) -> int:
@@ -2078,12 +2117,14 @@ class CLI:
                 payload.update(self._maybe_autocommit(rm, state, args))
                 payload.update(self._state_backup_payload())
                 self.emit("land", payload)
+                self._write_last_stand_best_effort()
                 return OK
             if is_fallback_verify(cmd) or is_trivial(cmd):
                 payload = {"files": [], "deleted": [], "noop": True, "reverify": "skipped", "verify": cmd, "acceptance_prose": accept.prose(rm)}
                 payload.update(self._maybe_autocommit(rm, state, args))
                 payload.update(self._state_backup_payload())
                 self.emit("land", payload)
+                self._write_last_stand_best_effort()
                 return OK
             code, out = run_verify(self.root, cmd, "test")
             write_verify_log(self.root, sid or "land", cmd, code, out)
@@ -2119,6 +2160,7 @@ class CLI:
                     **self._state_backup_payload(),
                 },
             )
+            self._write_last_stand_best_effort()
             return OK
         result = gitops.land(self.root, wt)
         sid = state.verified[-1] if state.verified else ""
@@ -2129,6 +2171,7 @@ class CLI:
             payload.update(self._maybe_autocommit(rm, state, args))
             payload.update(self._state_backup_payload())
             self.emit("land", payload)
+            self._write_last_stand_best_effort()
             return OK
         if is_trivial(cmd):
             gitops.revert_land(self.root, result.get("backups") or [])
@@ -2173,6 +2216,7 @@ class CLI:
                 **self._state_backup_payload(),
             },
         )
+        self._write_last_stand_best_effort()
         return OK
 
     def cmd_rollback(self, args: list[str]) -> int:
@@ -2859,7 +2903,8 @@ class CLI:
     def cmd_doctor(self, args: list[str]) -> int:
         from rfg.doctor import run as doctor_run
 
-        report = doctor_run(self.root)
+        verbose = "--verbose" in (args or [])
+        report = doctor_run(self.root, verbose=verbose)
         self.emit("doctor", report)
         return OK if report["ok"] else USAGE
 
@@ -2964,7 +3009,8 @@ def main(argv: list[str] | None = None) -> int:
     c = CLI(root, json_out, dry, show_diff, show_risk=show_risk)
     mapping = {
         "init": lambda: c.cmd_init(rest),
-        "status": c.cmd_status,
+        "status": lambda: c.cmd_status(rest),
+        "resume": lambda: c.cmd_resume(),
         "plan": lambda: c.cmd_plan(rest),
         "next": lambda: c.cmd_next(rest),
         "context": lambda: c.cmd_context(rest),

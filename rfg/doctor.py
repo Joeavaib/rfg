@@ -469,7 +469,56 @@ def toolchain_notes_for(cmds: list[tuple[str, str]], root: str | Path) -> list[s
     return notes
 
 
-def run(root: str | Path) -> dict:
+def _oracle_type(w: str) -> str:
+    """Group key for same-type oracle warnings (RES-D, 1 Summenzeile pro Typ)."""
+    if "but verify does not name dependency path" in w:
+        return "dependency-path-mismatch"
+    if "verify names" in w and "path[] entries" in w:
+        return "verify-coverage-thin"
+    if "broad scope" in w:
+        return "broad-scope"
+    if "verify does not reference any path[] entry" in w:
+        return "verify-scope-elsewhere"
+    if "verify names" in w and "outside path" in w:
+        return "verify-outside-path"
+    if "identical to predecessor" in w:
+        return "verify-identical-predecessor"
+    if "shared by" in w and "steps" in w:
+        return "verify-shared"
+    if "whole-suite" in w:
+        return "whole-suite-verify"
+    if "weak-verify" in w:
+        return "weak-verify"
+    if "sham-verify" in w:
+        return "sham-verify"
+    if "unknown engine" in w:
+        return "unknown-engine"
+    return "other"
+
+
+def summarize_oracle_warnings(warns: list[str]) -> list[str]:
+    """Collapse same-type oracle warnings to 1 summary line each (RES-D).
+
+    Details stay available via `rfg doctor --verbose`. Warn-first, no gate.
+    """
+    groups: dict[str, list[str]] = {}
+    for w in warns or []:
+        groups.setdefault(_oracle_type(w), []).append(w)
+    out: list[str] = []
+    for typ in sorted(groups):
+        items = groups[typ]
+        if len(items) == 1:
+            out.append(items[0])
+            continue
+        example = items[0].split(";")[0][:100]
+        out.append(
+            f"{len(items)}x {typ} (z.B. {example}; "
+            f"{len(items) - 1} weitere; Details mit --verbose)"
+        )
+    return out
+
+
+def run(root: str | Path, verbose: bool = False) -> dict:
     root = Path(root)
     langs = index.discover_all(root)
     st = Store(root)
@@ -493,6 +542,9 @@ def run(root: str | Path) -> dict:
         "repo": {"ok": gitops.is_repo(root), "detail": str(root)},
         "roadmap": {"ok": st.exists(), "detail": str(st.roadmap_path) if st.exists() else "missing"},
         "schema": {"ok": schema_ok, "detail": schema},
+        # RES-D: recovery steht im ersten Drittel (Key-Position, nicht erst unten).
+        # Die spaetere Zuweisung aktualisiert nur das Detail (gleiche Position).
+        "recovery": {"ok": True, "detail": "ok"},
         "languages": {"ok": bool(langs), "detail": langs},
         "compile_commands": {"ok": True, "detail": caps.has_compile_commands(root)},
         "rust_analyzer": {"ok": True, "detail": caps.rust_analyzer_ok()},
@@ -566,7 +618,11 @@ def run(root: str | Path) -> dict:
             oracle_warn = oracle_warnings(st.load_roadmap().steps)
         except Exception:
             pass
-    checks["oracles"] = {"ok": True, "detail": oracle_warn or "ok"}
+    if verbose:
+        oracle_detail: object = oracle_warn or "ok"
+    else:
+        oracle_detail = summarize_oracle_warnings(oracle_warn) or "ok"
+    checks["oracles"] = {"ok": True, "detail": oracle_detail}
     stale_fns: list[str] = []
     try:
         from rfg import ledger as _ledger
@@ -631,9 +687,25 @@ def run(root: str | Path) -> dict:
         # deliberately not warned about.
         wt = gitops.worktree_path(root)
         if wt.is_dir() and gitops.is_repo(str(wt)) and gitops.dirty_tracked(str(wt)):
-            rec_notes.append(".rfg/worktree has uncommitted changes (land copies worktree onto root)")
+            rec_notes.append(
+                "git-dirty in .rfg/worktree "
+                "(uncommitted tracked files; land copies worktree onto root)"
+            )
+        # RES-D Wortwahl: git-dirty (uncommittet) vs. worktree-drift (Root!=Worktree).
+        try:
+            from rfg.resume import _worktree_drift as _drift_of
+
+            _st = st.load_state()
+            _rm = st.load_roadmap()
+            _drift = _drift_of(root, _st)
+            if _drift.get("drift"):
+                _files = ",".join((_drift.get("files") or [])[:5]) or "files differ"
+                rec_notes.append(f"worktree-drift: root differs from .rfg/worktree ({_files})")
+        except Exception:
+            pass
     except Exception:
         pass
+    # Position bleibt (Key existiert seit oben im ersten Drittel).
     checks["recovery"] = {"ok": True, "detail": rec_notes or "ok"}
     # compile db missing is not a doctor failure; it's informational
     failed = [k for k, v in checks.items() if not v["ok"] and k in {"python", "git", "repo"}]

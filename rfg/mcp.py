@@ -32,6 +32,7 @@ CORE_TOOLS = (
     "claim",
     "release",
     "progress",
+    "resume",
     "doctor",
     "recipe",
     "why",
@@ -94,7 +95,8 @@ SCHEMAS = {
     "rollback": {"type": "object", "properties": {"root": _ROOT}},
     "claim": {"type": "object", "properties": {"root": _ROOT, "step": _STR, "agent": _STR}},
     "progress": {"type": "object", "properties": {"root": _ROOT}},
-    "doctor": {"type": "object", "properties": {"root": _ROOT}},
+    "resume": {"type": "object", "properties": {"root": _ROOT}},
+    "doctor": {"type": "object", "properties": {"root": _ROOT, "verbose": _BOOL}},
     "recipe": {
         "type": "object",
         "properties": {
@@ -166,6 +168,7 @@ TOOLS = [
     {"name": "baseline", "description": "Capture perf oracle baseline"},
     {"name": "repro", "description": "Run debug oracle / write repro.log"},
     {"name": "progress", "description": "Goal, counts, exceptions"},
+    {"name": "resume", "description": "One-call session resume (goal, counts, last/next, git, drift, checkpoint)"},
     {"name": "digest", "description": "Write .rfg/digest.json nightly handoff"},
     {"name": "why", "description": "Why a step is ready or blocked"},
     {"name": "impact", "description": "Hit counts. files=true to list paths."},
@@ -295,6 +298,8 @@ def call_tool(name: str, arguments: dict[str, Any], root: str) -> tuple[int, dic
         return c.cmd_init([]), {}
     if name == "status":
         return c.cmd_status(), {}
+    if name == "resume":
+        return c.cmd_resume(), {}
     if name == "next":
         return c.cmd_next(), {}
     if name == "context":
@@ -458,7 +463,7 @@ def call_tool(name: str, arguments: dict[str, Any], root: str) -> tuple[int, dic
     if name == "harvest_stat":
         return _call_farm("stat", arguments, root)
     if name == "doctor":
-        return c.cmd_doctor([]), {}
+        return c.cmd_doctor(["--verbose"] if arguments.get("verbose") else []), {}
     if name == "migrate":
         return c.cmd_migrate([]), {}
     return 1, {"error": "unknown tool"}

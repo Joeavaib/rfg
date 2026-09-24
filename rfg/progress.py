@@ -49,6 +49,28 @@ def _by_epic_counts(rm: Roadmap, steps: list[dict]) -> dict:
     return out
 
 
+def pending_land(root: str, rm: Roadmap, state: State) -> dict:
+    """Verified-but-uncommitted visibility (RES-C, explicit pending-land).
+
+    verified != landed != committed: when verified steps exist and the
+    root has tracked-dirty files, the P1.1/P1.2 case (verified, 5 files
+    uncommitted, HEAD old) must be visible instead of silent. Returns
+    {"steps": [...verified ids...], "dirty": [...files...]} or empty
+    steps when clean. Warn-first, never a gate.
+    """
+    try:
+        verified_ids = list(getattr(state, "verified", "") or [])
+    except Exception:
+        verified_ids = []
+    try:
+        dirty = sorted(gitops.dirty_tracked_files(root)) if gitops.is_repo(root) else []
+    except Exception:
+        dirty = []
+    if verified_ids and dirty:
+        return {"steps": verified_ids, "dirty": dirty}
+    return {"steps": [], "dirty": dirty}
+
+
 def report(root: str, rm: Roadmap, state: State) -> dict:
     snap = dag.compute(rm, state)
     snap["dirty"] = apply_dirty(root, rm, state)
@@ -115,6 +137,19 @@ def report(root: str, rm: Roadmap, state: State) -> dict:
     acc_code, acc_out, _acc = accept.run_all(root, rm)
     if acc_code != 0:
         exceptions.append({"kind": "acceptance", "step": "", "detail": (acc_out or "acceptance failed").strip()[:300]})
+    try:
+        pl = pending_land(root, rm, state)
+    except Exception:
+        pl = {"steps": [], "dirty": []}
+    if pl.get("steps"):
+        dirty_show = ",".join((pl.get("dirty") or [])[:10]) or "tracked files"
+        exceptions.append(
+            {
+                "kind": "pending-land",
+                "step": (pl.get("steps") or [""])[-1],
+                "detail": f"verified but uncommitted: {len(pl['steps'])} step(s) verified, git-dirty {dirty_show}; land+commit or keep pending-land explicit",
+            }
+        )
     by_epic = _by_epic_counts(rm, steps)
     from rfg import oracles as _oracles
 
@@ -148,6 +183,7 @@ def report(root: str, rm: Roadmap, state: State) -> dict:
         "ready": [s["id"] for s in steps if s["status"] in ("ready", "claimed", "in_progress")][:8],
         "by_epic": by_epic,
         "exceptions": exceptions,
+        "pending_land": pl,
         "perf": perf,
         "ok": not failed and not snap.get("dirty") and acc_code == 0,
     }

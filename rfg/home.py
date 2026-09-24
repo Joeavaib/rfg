@@ -6,15 +6,6 @@ import os
 from pathlib import Path
 
 
-def find_rfg_home() -> Path:
-    env = os.environ.get("RFG_HOME", "").strip()
-    if env:
-        return Path(env).expanduser().resolve()
-    import rfg
-
-    return Path(rfg.__file__).resolve().parent.parent
-
-
 def _looks_like_home(cand: Path) -> bool:
     return (cand / "rfg" / "__main__.py").is_file() or (cand / "rfg.py").is_file()
 

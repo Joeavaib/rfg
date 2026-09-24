@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any
 
 
-def _is_traversal_path(p: str) -> bool:
+def is_traversal_path(p: str) -> bool:
     """True for absolute paths and `..` components (never rewrite, exit 4)."""
     if not p:
         return False
@@ -20,7 +20,7 @@ def _is_traversal_path(p: str) -> bool:
 
 def _reject_traversal(paths: list[str]) -> list[str]:
     for p in paths:
-        if _is_traversal_path(p):
+        if is_traversal_path(p):
             raise ValueError(f"unsupported: path traversal {p!r}")
     return paths
 
@@ -96,7 +96,7 @@ def expand_dir_paths(root: str | Any, paths: list[str] | None) -> list[str]:
     root_p = Path(root)
     out: list[str] = []
     for p in paths or []:
-        if not p or p.startswith("/") or ".." in Path(p).parts:
+        if not p or is_traversal_path(p):
             continue
         full = root_p / p
         if full.is_dir():
@@ -131,6 +131,7 @@ class Replace:
 
 ORACLE_KINDS = ("test", "perf", "debug", "security")
 PROFILES = ("refactor", "feature", "perf", "debug", "security")
+ENGINES = ("replace", "ast-grep", "manual", "implement", "scaffold", "run", "survey")
 STOP_ENGINES = ("manual", "implement", "survey")
 CONTRACT_ENGINES = ("manual", "implement", "scaffold", "survey")
 MECHANICAL_ENGINES = ("replace", "", "ast-grep", "scaffold")
@@ -242,8 +243,6 @@ class Oracle:
 @dataclass
 class Budget:
     max_applies: int = 0  # 0 = unlimited
-    max_seconds: float = 0.0  # 0 = disabled (today's behavior)
-    max_related: int = 0  # 0 = disabled (today's behavior)
 
 
 @dataclass

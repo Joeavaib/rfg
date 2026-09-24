@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from rfg.types import is_traversal_path
+
 TPL = Path(__file__).resolve().parent / "data" / "scaffold"
 
 
@@ -11,7 +13,7 @@ def _paths(paths: list[str]) -> list[str]:
     out: list[str] = []
     for rel in paths or []:
         rel = (rel or "").strip().lstrip("/")
-        if not rel or ".." in Path(rel).parts:
+        if not rel or is_traversal_path(rel):
             continue
         out.append(rel)
     return out

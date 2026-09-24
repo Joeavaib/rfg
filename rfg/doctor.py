@@ -12,11 +12,8 @@ import rfg as rfg_pkg
 from rfg.detect import default_verify
 from rfg.fmtutil import TOOLS
 from rfg.store import Store
-from rfg.types import BARE_SUITE, Step, step_paths
+from rfg.types import BARE_SUITE, ENGINES, Step, step_paths
 from rfg.verify import is_weak_verify, is_sham_verify
-
-
-KNOWN_ENGINES = ("replace", "", "ast-grep", "manual", "implement", "scaffold", "run", "survey")
 
 # KD: warn-first scope breadth rule (no gate, no hard limit, exit 0).
 # Broad path[] = ab BREADTH_THRESHOLD Dateien (5 warnt, 4 nicht) oder ein
@@ -117,7 +114,7 @@ def unknown_engine_warnings(steps: list[Step], extra: Step | None = None) -> lis
         all_steps = [s for s in all_steps if s.id != extra.id] + [extra]
     for s in all_steps:
         eng = (s.engine or "").strip()
-        if eng and eng not in KNOWN_ENGINES:
+        if eng and eng not in ENGINES:
             hint = " (use run with --verify 'bash ...')" if eng == "bash" else ""
             warns.append(f"{s.id} unknown engine {eng!r}{hint} (engines: replace|implement|manual|scaffold|run|survey|ast-grep)")
     return warns

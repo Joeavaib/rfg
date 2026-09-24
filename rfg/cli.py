@@ -13,12 +13,11 @@ from rfg import accept, audit, caps, context, cxxcompile, dag, edges, fleet, fmt
 from rfg import progress, recipes, risk, scaffold, security, telemetry
 from rfg.detect import FALLBACK_VERIFY, default_verify
 from rfg.store import Store, claim_held_payload
-from rfg.types import Budget, Checkpoint, Goal, Hypothesis, Oracle, Replace, Roadmap, Step
-from rfg.types import coerce_depends_list, coerce_path_list, default_engine, is_contract, is_implement, is_mechanical, is_stop_engine, step_allowed_paths, step_observation, step_paths, step_want
+from rfg.types import Budget, Checkpoint, ENGINES, Goal, Hypothesis, Oracle, Replace, Roadmap, Step
+from rfg.types import coerce_depends_list, coerce_path_list, default_engine, is_contract, is_mechanical, is_stop_engine, step_allowed_paths, step_observation, step_paths, step_want
 from rfg.verify import clip_output, dispatch as run_verify, is_fallback_verify, is_sham_verify, is_trivial, looks_like_missing_binary, write_log as write_verify_log
 
 OK, USAGE, VERIFY_FAIL, DIRTY, UNSUPPORTED, CONFLICT = 0, 1, 2, 3, 4, 5
-ENGINES = ("replace", "", "ast-grep", "manual", "implement", "scaffold", "run", "survey")
 
 
 def _gate_runnable(cmd: str) -> bool:
@@ -142,39 +141,6 @@ def cross_timeout_for(remaining_s: float, default_s: float) -> float:
     if remaining_s <= 0:
         return 5.0
     return min(default_s, remaining_s)
-
-
-def cross_budget_note(related_total, elapsed_s, budget) -> str:
-    """Warn-only note when cross scope exceeds Budget (XB, never a gate).
-
-    related_total > max_related or elapsed > max_seconds yields a label
-    string; otherwise "". max_* = 0 disables (today's behavior). Pure
-    function, stdlib-only, changes no exit (D3 pattern: label only).
-    """
-    try:
-        total = int(related_total)
-    except (TypeError, ValueError):
-        total = 0
-    try:
-        elapsed = float(elapsed_s)
-    except (TypeError, ValueError):
-        elapsed = 0.0
-    try:
-        max_related = int(getattr(budget, "max_related", 0) or 0)
-    except (TypeError, ValueError):
-        max_related = 0
-    try:
-        max_seconds = float(getattr(budget, "max_seconds", 0) or 0)
-    except (TypeError, ValueError):
-        max_seconds = 0.0
-    parts: list[str] = []
-    if max_related > 0 and total > max_related:
-        parts.append(f"related_total {total} > max_related {max_related}")
-    if max_seconds > 0 and elapsed > max_seconds:
-        parts.append(f"elapsed {elapsed:.1f}s > max_seconds {max_seconds:g}s")
-    if not parts:
-        return ""
-    return "budget: " + "; ".join(parts)
 
 
 def triage_cross_failure(code: int, output: str, was_red_before: bool) -> str:
@@ -1122,7 +1088,7 @@ class CLI:
                 hint = f" (toolchains are verify commands, not engines; use implement/manual/run with --verify)"
             self.emit_err(
                 "plan",
-                f"unsupported engine: {step.engine}{hint} (engines: {', '.join(e or 'implement' for e in ENGINES if e)})",
+                f"unsupported engine: {step.engine}{hint} (engines: {', '.join(ENGINES)})",
             )
             return UNSUPPORTED
         existing = next((s for s in rm.steps if have and step.id and s.id == step.id), None)
@@ -1953,12 +1919,6 @@ class CLI:
         def _memo_key(kind: str, cmd: str) -> tuple[str, str]:
             return (kind or "", " ".join((cmd or "").split()))
         deduped: list[dict] = []
-        # XB: cross-section elapsed for budget_note (warn-only, D4-style
-        # measure-only; never ordering, deadline, or gates).
-        try:
-            _cross_t0 = _time.monotonic()
-        except Exception:
-            _cross_t0 = 0.0
         for rid in related:
             rs = dag.step_by_id(rm, rid)
             if not rs:
@@ -2084,19 +2044,6 @@ class CLI:
             _rlen = 0
         payload["related_total"] = _rtotal_val
         payload["related_truncated"] = bool(_rtotal_val > _rlen)
-        # XB: cross-budget note (warn-only; RFG_CROSS_BUDGET deadline,
-        # all exits, and max_applies path unchanged; max_*=0 disables).
-        try:
-            # Cross-section seconds (not per-verify elapsed_ms) feed budget_note.
-            _cross_elapsed = (_time.monotonic() - _cross_t0) if _cross_t0 else 0.0
-        except Exception:
-            _cross_elapsed = 0.0
-        try:
-            _bn = cross_budget_note(_rtotal_val, _cross_elapsed, rm.budget)
-        except Exception:
-            _bn = ""
-        if _bn:
-            payload["budget_note"] = _bn
         self.emit("verify", payload)
         self._backup_best_effort()
         self._write_last_stand_best_effort()

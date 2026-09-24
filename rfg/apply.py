@@ -4,7 +4,7 @@ import re
 from pathlib import Path
 
 from rfg.index import LANG_EXTS
-from rfg.types import Step
+from rfg.types import Step, is_traversal_path
 
 # Single-source: alle indexierten Exts sind ersetzbar. .mod ist
 # apply-only (go.mod-Nachbar), kein index-EXT – bewusste Ausnahme.
@@ -265,7 +265,7 @@ def write_targets_outside(root: str | Path, rels: list[str] | None) -> list[str]
         return list(rels or [])
     bad: list[str] = []
     for rel in rels or []:
-        if not rel or rel.startswith("/") or ".." in Path(rel).parts:
+        if not rel or is_traversal_path(rel):
             bad.append(rel)
             continue
         try:

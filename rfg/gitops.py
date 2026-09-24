@@ -5,6 +5,8 @@ import re
 import subprocess
 from pathlib import Path
 
+from rfg.types import is_traversal_path
+
 
 _BACKUP_ID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
 
@@ -19,7 +21,7 @@ def _valid_backup_id(backup_id: object) -> bool:
         return False
     if backup_id.startswith((".", "-", "/")):
         return False
-    if ".." in Path(backup_id).parts:
+    if is_traversal_path(backup_id):
         return False
     return _BACKUP_ID_RE.fullmatch(backup_id) is not None
 
@@ -629,11 +631,11 @@ def _land_kinds(root: Path, wt: Path) -> dict[str, str]:
         if len(parts) < 2:
             continue
         status, rel = parts[0], parts[-1].strip()
-        if not rel or rel.startswith(".rfg") or rel.startswith("/") or ".." in Path(rel).parts:
+        if not rel or rel.startswith(".rfg") or is_traversal_path(rel):
             continue
         kinds[rel] = "delete" if status.startswith("D") else "copy"
     for st, rel in _porcelain(wt):
-        if not rel or rel.startswith("/") or ".." in Path(rel).parts:
+        if not rel or is_traversal_path(rel):
             continue
         if st.strip() == "D":
             kinds[rel] = "delete"
@@ -740,7 +742,7 @@ def stage_paths(
         return []
     copied: list[str] = []
     for rel in paths:
-        if not rel or rel.startswith("/") or ".." in Path(rel).parts:
+        if not rel or is_traversal_path(rel):
             continue
         src = src_root / rel
         dst = dst_root / rel

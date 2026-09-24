@@ -283,6 +283,16 @@ def related_step_ids(steps, step) -> list[str]:
     return deduped[: _related_cap()]
 
 
+# Verify-strength layers (FLICK-6: four predicates, one concept each —
+# kept separate on purpose, consumers differ):
+#   is_trivial ......... "" / "true" → exit 4 (unsupported), exit 5 under --strict.
+#   is_fallback_verify . trivial + "test -n ok" (detect.py default) → same gates.
+#   is_weak_verify ..... fallback/trivial + existence asserts (test -e/-f,
+#                        Path.exists) → doctor warning only, never a gate.
+#                        Sole prod consumer: doctor.py (tests pin it too).
+#   is_sham_verify ..... tautologies (assert True, exit 0) → doctor warning
+#                        + --strict gate via strict_verify_gap (cli.py).
+# Do not merge: each layer has exactly one exit/warning contract.
 def is_trivial(command: str | None) -> bool:
     """true/empty is not a real verify command."""
     s = (command or "").strip().lower()

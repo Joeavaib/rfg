@@ -28,7 +28,7 @@ Feature default engine is `implement` if there is no `--from`. Survey: `engine=s
 2. `plan --goal` then steps, **or** `recipe apply feature-module` / `feature-campaign` with `--step id:path:verify`.
 3. `next` → `context` → `tick`.
 4. **replace / scaffold / run:** `tick` = apply+verify. `apply --dry-run` if unsure.
-5. **implement / manual / survey:** `tick` claims `in_progress` and returns `want`, `path`, `edit_root`, `after_edit: apply`. Untracked dirty root is ok. **Edit at repo root**, then `apply` (copies `path[]` **and** other root edits into the worktree), then `verify` (only from implemented; log `.rfg/verify/<step>.log`).
+5. **implement / manual / survey:** `tick` claims `in_progress` and returns `want`, `path`, `edit_root`, `after_edit: apply`. Untracked dirty root is ok. **Edit at repo root**, then `apply` (copies `path[]` and declared `extras` into the worktree; undeclared files refuse without `--allow-extra`), then `verify` (only from implemented; log `.rfg/verify/<step>.log`).
 6. Exit 2 → `rollback last`. `next` null → `land`. Unfinished / failed → land exit 5. Dirty tracked root (except implement isolation) → exit 3.
 7. `progress` for counts/exceptions (`data.ok`). Plan JSON from `plan --list` is ids/status, not file dumps. `impact` is counts; `files=true` / `--files` to list.
 
@@ -48,7 +48,7 @@ These are the expensive questions. Do not rediscover them from `rfg/*.py`.
 
 **What may I change?** Files in this step’s `path[]`. Side artefacts (`rfgfeedback.md`) via `plan --extras`. `apply` warns if it staged undeclared files — extend path or extras; do not ignore the warning.
 
-**What does verify run?** The step command, then **Cross-Verify**: already-applied dependents and path-overlap neighbors. Pending neighbors never block. Logs under `.rfg/verify/`. Failures stay exit 2; labels (ENV/COST/PRE-EXISTING/REGRESS-SUSPECT) are hints.
+**What does verify run?** The step command as an **unsandboxed shell** (cwd root or worktree, may write anywhere — `roadmap.yaml` is a script host, review before running), then **Cross-Verify**: already-applied dependents and path-overlap neighbors. Pending neighbors never block. Logs under `.rfg/verify/`. Failures stay exit 2; labels (ENV/COST/PRE-EXISTING/REGRESS-SUSPECT) are hints.
 
 **What does land run?** Last step verify + suite `rm.verify` (**Land-Gate**) + executable acceptance. Trivial/`true` verify → exit 4 + revert. Missing gate binary → skip + log, not fail. Open steps or applied-not-verified → exit 5.
 
@@ -74,7 +74,7 @@ These are the expensive questions. Do not rediscover them from `rfg/*.py`.
 
 **Fleet?** Read-only status over `fleet.yaml`. Not a scheduler.
 
-**Who writes tests?** You. rfg only runs the command you put on the step / roadmap. Sham verifies (`true`, empty) are doctor warnings; `--strict` makes them errors.
+**Who writes tests?** You. rfg only runs the command you put on the step / roadmap. Sham verifies (`true`, empty) are doctor warnings; `--strict` makes them errors — on `plan --check` as findings, on `tick --strict` / `land --strict` as a gate (verify must name a file under `path[]`/`extras`).
 
 ---
 

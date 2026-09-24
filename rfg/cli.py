@@ -98,6 +98,33 @@ def same_claim_client(state, agent: str) -> bool:
     return state.claim_agent == agent
 
 
+def _explicit_agent(args: list[str] | None) -> str:
+    """Value passed via --agent ("" when the flag is absent)."""
+    argv = list(args or [])
+    i = 0
+    while i < len(argv):
+        if argv[i] == "--agent" and i + 1 < len(argv):
+            return argv[i + 1]
+        i += 1
+    return ""
+
+
+def _impersonation_error(args: list[str] | None) -> str:
+    """FENCE-3: --agent differing from RFG_AGENT is impersonation (exit 5).
+
+    The flag stays allowed when RFG_AGENT is empty or matches (established
+    harness pattern); minting a foreign identity is refused instead.
+    """
+    flag = _explicit_agent(args)
+    env = current_agent()
+    if flag and env and flag != env:
+        return (
+            f"conflict: --agent {flag!r} does not match RFG_AGENT {env!r} "
+            "(no impersonation; drop the flag or unset RFG_AGENT)"
+        )
+    return ""
+
+
 def cross_timeout_for(remaining_s: float, default_s: float) -> float:
     """Per-related timeout capped by remaining cross budget (D2).
 
@@ -317,6 +344,43 @@ def contract_warning_for(step: Step) -> str:
     )
 
 
+_STRICT_EXTS = (
+    ".py", ".go", ".ts", ".tsx", ".js", ".jsx", ".mts", ".cts",
+    ".rs", ".cc", ".cpp", ".cxx", ".h", ".hh", ".hpp", ".c",
+    ".java", ".rb", ".php",
+)
+
+
+def strict_verify_gap(step: Step) -> str:
+    """FENCE-5: reason when step verify names no file under path[]/extras.
+
+    "" means covered. Survey is exempt (notes-only, nothing falsifiable).
+    Trivial verifies (true, :, echo ok) name no file and refuse
+    automatically — no no-op regex hunt needed.
+    """
+    if (step.engine or "").strip() == "survey":
+        return ""
+    declared = [(p or "").replace("\\", "/").lstrip("./") for p in step_allowed_paths(step)]
+    declared = [p for p in declared if p]
+    if not declared:
+        return "no path[]/extras declared (strict needs a file to verify against)"
+    toks: list[str] = []
+    for tok in (step.verify or "").replace("'", " ").replace('"', " ").split():
+        t = tok.strip().strip("\"'").split("::")[0].replace("\\", "/").lstrip("./")
+        if not t or t.startswith("-") or "=" in t:
+            continue
+        if "/" in t or t.endswith(_STRICT_EXTS):
+            toks.append(t)
+    for t in toks:
+        if any(t == d or t.startswith(d + "/") or d.startswith(t + "/") for d in declared):
+            return ""
+    shown = ", ".join(declared[:5])
+    return (
+        f"strict: verify {step.verify!r} names no file under path[]/extras "
+        f"(declared: {shown}); name a file or drop --strict"
+    )
+
+
 def _attach_contract_warning(payload: dict, step: Step) -> None:
     cw = contract_warning_for(step)
     if not cw:
@@ -347,11 +411,13 @@ Commands:
    resume               1-call session resume (goal, counts, last/next, git, drift, checkpoint)
    plan                 write or update steps / hypothesis (--from-impact stamps path)
   next                 print the next free step (includes claim/budget)
-  apply [--dry-run] [--diff] [--show-risk]  apply next (or given) step in a git worktree
+   apply [--dry-run] [--diff] [--show-risk] [--allow-extra]  apply next (or given) step in a git worktree
+                                                     (undeclared extras refuse without --allow-extra)
   context [step]       step contract + snippets for existing paths
-  tick                 apply+verify if replace; stop with contract if manual/implement
-  verify               run verify for an implemented/applied step
-  land [--commit|--no-commit]  copy the apply worktree onto the root and re-verify
+   tick                 apply+verify if replace; stop with contract if manual/implement
+                        (--strict: refuse when verify names no file under path[]/extras)
+   verify               run verify for an implemented/applied step
+   land [--commit|--no-commit] [--strict]  copy the apply worktree onto the root and re-verify
                         (--commit or RFG_AUTO_COMMIT=1 snapshots a local commit; never pushes)
   rollback last        restore the last checkpoint
   backup               list roadmap/state backups in .rfg/land-backups/
@@ -421,7 +487,8 @@ Cousins only with --sources.
     "apply": """rfg apply — apply a step in a git worktree
 
 Usage:
-  rfg apply [STEP] [--dry-run] [--diff] [--force] [--agent NAME]
+  rfg apply [STEP] [--dry-run] [--diff] [--force] [--agent NAME] [--allow-extra]
+Undeclared extras (files outside path[]/extras) refuse without --allow-extra.
 """,
     "tick": """rfg tick — apply+verify (replace) or claim+contract (implement/manual)
 
@@ -740,10 +807,20 @@ class CLI:
             if not args[i].startswith("-"):
                 sid = args[i]
             i += 1
+        imp = _impersonation_error(args)
+        if imp:
+            self.emit_err("tick", imp)
+            return CONFLICT
         epic_warning = ""
         if epic:
             sid, epic_warning = _restrict_sid_to_epic(rm, state, sid, epic)
         step = dag.step_by_id(rm, sid) if sid else None
+        if step is not None and "--strict" in list(args or []):
+            # FENCE-5: fail fast before any claim/apply side effect.
+            gap = strict_verify_gap(step)
+            if gap:
+                self.emit_err("tick", f"conflict: {gap}")
+                return CONFLICT
         if step is not None:
             frm = step.replace.from_pat if step.replace else ""
             step.engine = default_engine(step.engine, from_pat=frm)
@@ -835,6 +912,7 @@ class CLI:
                 "followup": followup,
                 "context": context.tick_view(here if Path(here).is_dir() else self.root, rm2, state2, step2),
             },
+            ok=(code == 0),
         )
         return code
 
@@ -1272,6 +1350,7 @@ class CLI:
         sid = dag.next_id(rm, state)
         agent = current_agent()
         force = False
+        allow_extra = "--allow-extra" in list(args or [])
         epic = _parse_epic_arg(args)
         i = 0
         while i < len(args):
@@ -1295,6 +1374,10 @@ class CLI:
             if not args[i].startswith("-"):
                 sid = args[i]
             i += 1
+        imp = _impersonation_error(args)
+        if imp:
+            self.emit_err("apply", imp)
+            return CONFLICT
         epic_warning = ""
         if epic:
             sid, epic_warning = _restrict_sid_to_epic(rm, state, sid, epic)
@@ -1567,6 +1650,12 @@ class CLI:
                 self.emit_err("apply", str(e))
                 return UNSUPPORTED
             except (ValueError, RuntimeError) as e:
+                # FENCE-2: "unsupported: ..." refuses an escape (exit 4);
+                # anything else stays a conflict (exit 5). Message protocol,
+                # same as plan-time traversal errors.
+                if str(e).startswith("unsupported"):
+                    self.emit_err("apply", str(e))
+                    return UNSUPPORTED
                 self.emit_err("apply", str(e))
                 return CONFLICT
         # Format-after-apply runs for every engine, report-only (never a gate):
@@ -1618,6 +1707,18 @@ class CLI:
             ]
             extra_show = sorted(extra_edits)[:20]
             extra_omitted = len(extra_edits)
+            if extra_edits and not allow_extra and isolation:
+                # FENCE-4b: undeclared extras are refused by default (exit 1,
+                # fixable); --allow-extra opts into the old loud staging.
+                # No-head mode (target == root, nothing is copied) is exempt:
+                # files already live at root, nothing escapes anywhere.
+                self.emit_err(
+                    "apply",
+                    f"refused: {len(extra_edits)} extra file(s) outside path[]: "
+                    f"{', '.join(extra_show[:5])}; fix: declare via plan --path "
+                    "or allowlist via plan --extras, or re-apply with --allow-extra",
+                )
+                return USAGE
             compact = {
                 "files": [{"path": p, "hits": 1} for p in present],
                 "skipped": [],
@@ -2090,6 +2191,16 @@ class CLI:
         if unverified:
             self.emit_err("land", "conflict: applied but not verified: " + ",".join(unverified))
             return CONFLICT
+        if "--strict" in list(args or []):
+            # FENCE-5: every landed step must prove with a file-named verify.
+            for sid in state.applied:
+                s = dag.step_by_id(rm, sid)
+                if s is None:
+                    continue
+                gap = strict_verify_gap(s)
+                if gap:
+                    self.emit_err("land", f"conflict: step {sid}: {gap}")
+                    return CONFLICT
         wt = state.worktree or ""
         landing_wt = bool(wt) and Path(wt).resolve() != Path(self.root).resolve() and Path(wt).is_dir()
         stop_applied = any(
@@ -2162,7 +2273,12 @@ class CLI:
             )
             self._write_last_stand_best_effort()
             return OK
-        result = gitops.land(self.root, wt)
+        # FENCE-4: land copies/deletes only declared paths (union of
+        # path[] + extras over all steps; dir entries cover their subtree).
+        _allowed: set[str] = set()
+        for _s in rm.steps:
+            _allowed.update(step_allowed_paths(_s))
+        result = gitops.land(self.root, wt, allowed=_allowed)
         sid = state.verified[-1] if state.verified else ""
         step = dag.step_by_id(rm, sid) if sid else None
         cmd = (step.verify if step else "") or rm.verify
@@ -2324,6 +2440,10 @@ class CLI:
             if not args[i].startswith("-"):
                 sid = args[i]
             i += 1
+        imp = _impersonation_error(args)
+        if imp:
+            self.emit_err("claim", imp)
+            return CONFLICT
         if not sid:
             self.emit_err("claim", "no free step")
             return USAGE

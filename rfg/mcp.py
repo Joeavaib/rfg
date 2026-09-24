@@ -76,7 +76,7 @@ SCHEMAS = {
     },
     "next": {"type": "object", "properties": {"root": _ROOT}},
     "context": {"type": "object", "properties": {"root": _ROOT, "step": _STR, "sources": _BOOL}},
-    "tick": {"type": "object", "properties": {"root": _ROOT, "step": _STR}},
+    "tick": {"type": "object", "properties": {"root": _ROOT, "step": _STR, "agent": _STR, "strict": _BOOL}},
     "apply": {
         "type": "object",
         "properties": {
@@ -85,13 +85,14 @@ SCHEMAS = {
             "dry_run": _BOOL,
             "force": _BOOL,
             "agent": _STR,
+            "allow_extra": _BOOL,
         },
     },
     "release": {"type": "object", "properties": {"root": _ROOT}},
     "backup": {"type": "object", "properties": {"root": _ROOT}},
     "restore": {"type": "object", "properties": {"root": _ROOT, "id": _STR}},
     "verify": {"type": "object", "properties": {"root": _ROOT, "step": _STR}},
-    "land": {"type": "object", "properties": {"root": _ROOT, "commit": _BOOL}},
+    "land": {"type": "object", "properties": {"root": _ROOT, "commit": _BOOL, "strict": _BOOL}},
     "rollback": {"type": "object", "properties": {"root": _ROOT}},
     "claim": {"type": "object", "properties": {"root": _ROOT, "step": _STR, "agent": _STR}},
     "progress": {"type": "object", "properties": {"root": _ROOT}},
@@ -313,6 +314,8 @@ def call_tool(name: str, arguments: dict[str, Any], root: str) -> tuple[int, dic
             args.append(str(arguments["step"]))
         if arguments.get("agent"):
             args.extend(["--agent", str(arguments["agent"])])
+        if arguments.get("strict"):
+            args.append("--strict")
         return c.cmd_tick(args), {}
     if name == "plan":
         for k, flag in (
@@ -357,6 +360,8 @@ def call_tool(name: str, arguments: dict[str, Any], root: str) -> tuple[int, dic
             args.append(str(arguments["step"]))
         if arguments.get("force"):
             args.append("--force")
+        if arguments.get("allow_extra"):
+            args.append("--allow-extra")
         if arguments.get("agent"):
             args.extend(["--agent", str(arguments["agent"])])
         return c.cmd_apply(args), {}
@@ -366,7 +371,9 @@ def call_tool(name: str, arguments: dict[str, Any], root: str) -> tuple[int, dic
         return c.cmd_verify(args), {}
     if name == "land":
         if arguments.get("commit"):
-            return c.cmd_land(["--commit"]), {}
+            return c.cmd_land(["--commit"] + (["--strict"] if arguments.get("strict") else [])), {}
+        if arguments.get("strict"):
+            return c.cmd_land(["--strict"]), {}
         return c.cmd_land([]), {}
     if name == "rollback":
         return c.cmd_rollback(["last"]), {}

@@ -596,6 +596,26 @@ def backup_untracked(dir: str | Path, backup_root: str | Path) -> list[str]:
     return saved
 
 
+def _is_landable(rel: str) -> bool:
+    """True unless rel is build debris (FENCE-4: pyc/vendor never land).
+
+    Unconditional: even a declared path never carries __pycache__ / .pyc /
+    node_modules / .venv / dist / build / target / .git onto root.
+    """
+    if not rel:
+        return False
+    if Path(rel).suffix.lower() in _SKIP_SUF:
+        return False
+    return not any(p in _SKIP_PARTS for p in Path(rel).parts)
+
+
+def _allowed_match(rel: str, files: set[str], dirs: set[str]) -> bool:
+    """Declared file, or below a declared dir entry (mapping steps)."""
+    if rel in files:
+        return True
+    return any(rel == d or rel.startswith(d + "/") for d in dirs)
+
+
 def _land_kinds(root: Path, wt: Path) -> dict[str, str]:
     """rel -> copy|delete, including commits on the worktree since root HEAD."""
     kinds: dict[str, str] = {}
@@ -622,8 +642,15 @@ def _land_kinds(root: Path, wt: Path) -> dict[str, str]:
     return kinds
 
 
-def land(root: str | Path, worktree: str | Path) -> dict:
-    """Copy worktree changes onto the main checkout. backups is for revert_land."""
+def land(root: str | Path, worktree: str | Path, allowed: set[str] | None = None) -> dict:
+    """Copy worktree changes onto the main checkout. backups is for revert_land.
+
+    FENCE-4: only declared paths land. `allowed` is the union of path[] +
+    extras (dir entries cover their subtree); when given, copies AND
+    deletes outside it are skipped. Build debris (__pycache__/.pyc/vendor)
+    never lands, even when declared. `allowed=None` keeps the legacy
+    copy-all behavior for non-campaign callers (CLI always passes a set).
+    """
     import shutil
 
     root = Path(root).resolve()
@@ -631,6 +658,11 @@ def land(root: str | Path, worktree: str | Path) -> dict:
     if not wt.is_dir() or root == wt:
         return {"files": [], "deleted": [], "noop": True, "backups": []}
     kinds = _land_kinds(root, wt)
+    if allowed is not None:
+        afiles = set(allowed)
+        adirs = {p for p in afiles if (root / p).is_dir() or (wt / p).is_dir()}
+        kinds = {rel: k for rel, k in kinds.items() if _allowed_match(rel, afiles, adirs)}
+    kinds = {rel: k for rel, k in kinds.items() if _is_landable(rel)}
     if not kinds:
         return {"files": [], "deleted": [], "noop": True, "backups": []}
     backups: list[tuple[str, bytes | None, str]] = []

@@ -56,12 +56,8 @@ def _worktree_drift(root: str | Path, state) -> dict:
     """
     from rfg import gitops as _g
 
-    raw = (getattr(state, "worktree", "") or "").strip()
-    if raw:
-        wt = Path(raw)
-        if not wt.is_dir():
-            return {"drift": False, "files": []}
-    else:
+    wt = Path(getattr(state, "worktree", "") or "")
+    if not wt or not wt.is_dir():
         try:
             wt = _g.worktree_path(root)
         except Exception:

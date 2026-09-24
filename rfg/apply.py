@@ -251,9 +251,43 @@ def patch(root: str | Path, step: Step) -> tuple[str, int]:
     return p["diff"], p["hits"]
 
 
+def write_targets_outside(root: str | Path, rels: list[str] | None) -> list[str]:
+    """Rels whose resolved write target escapes root (FENCE-2, exit 4).
+
+    Catches symlinks pointing outside, absolute paths and `..` segments
+    that bypassed plan-time validation (e.g. hand-edited roadmaps).
+    Pure function: returns the offending rels, raises never.
+    """
+    base: Path | None = None
+    try:
+        base = Path(root).resolve()
+    except OSError:
+        return list(rels or [])
+    bad: list[str] = []
+    for rel in rels or []:
+        if not rel or rel.startswith("/") or ".." in Path(rel).parts:
+            bad.append(rel)
+            continue
+        try:
+            (Path(root) / rel).resolve().relative_to(base)
+        except (ValueError, OSError):
+            bad.append(rel)
+    return bad
+
+
 def apply_step(root: str | Path, step: Step) -> int:
     p = preview(root, step)
     root = Path(root)
+    # Declared scope first: a .. path with 0 hits must still refuse,
+    # otherwise the escape check is hit-dependent (FENCE-2).
+    declared = list(step.replace.paths) if step.replace else []
+    escapees = write_targets_outside(root, declared + list(p["new_by_rel"]))
+    if escapees:
+        shown = ", ".join(list(dict.fromkeys(escapees))[:5])
+        raise ValueError(
+            f"unsupported: write target escapes the repo ({shown}); "
+            "symlink/absolute/.. targets are exit 4, never patched"
+        )
     for rel, neu in p["new_by_rel"].items():
         dst = root / rel
         try:

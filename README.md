@@ -140,7 +140,9 @@ Unknown `--engine` fails at `plan`/`tick` (exit 4). There is **no**
 
 Verify must be a **shell command** with exactly one test-file token, e.g.
 `python3 -m pytest tests/foo.py -q`. A bare path is executed as a program
-and exits 126.
+and exits 126. The shell is **unsandboxed**: it runs with cwd at the repo
+root or the worktree and may write anywhere — `roadmap.yaml` is a script
+host, review verifies before running them.
 
 ---
 
@@ -158,9 +160,10 @@ One oracle per step; the step command is only the start.
   toolchain **skips** the gate (logged). Trivial verify (`true` / empty) →
   revert + exit 4. Red gate → revert + exit 2.
 - **Every verify leaves a log** under `.rfg/verify/`.
-- **No silent scope:** `apply` stages declared `path[]` **and** extras, and
-  **warns** when other files were staged (`plan --path` / `plan --extras`).
-  Warn-first: extras are not a new gate.
+- **Declared scope:** `apply` stages `path[]` **and** declared `extras`;
+  undeclared files **refuse** (exit 1 — declare via `plan --path` /
+  `plan --extras`, or re-apply with `--allow-extra`). `land` copies only
+  declared paths and never build debris (`__pycache__`, `*.pyc`, vendor).
 - **Sham / weak verify:** `doctor` and `plan --check --strict` surface
   `true`, empty, or mismatched scope. Warn-first unless `--strict`.
 - Broad `path[]` (5+ files) with a skinny verify **warns** (doctor), it does
@@ -256,8 +259,9 @@ Not an LLM. Harvest/QLoRA farming is **out of tree**.
 
 Deliberately out: own parser, live SCIP, “the AI writes the patch and rfg
 takes credit”. Doctrine: no network in core, no daemons past step end,
-stdlib only, no writes outside worktree/`.rfg` until `land`. See
-`docs/factory-line.md`.
+stdlib only. rfg's own writes stay in worktree/`.rfg` until `land` — but
+`verify` is an unsandboxed shell (cwd root or worktree, may write anywhere)
+and `roadmap.yaml` is a script host. See `docs/factory-line.md`.
 
 If you want Autopilot, this repo will disappoint you on purpose.
 
